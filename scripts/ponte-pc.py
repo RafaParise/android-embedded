@@ -120,7 +120,7 @@ DOCS_MEMORIA = ["CLAUDE.md"] + [f"memoria/{n}.md" for n in (
     "ESTADO", "DISPOSITIVO", "DECISOES", "INTEGRACAO-A12", "ESPECIALISTA-A12", "RADAR-DESEMPENHO", "VPN-SEMPRE-ATIVA", "ANTIVIRUS",
     "TELA-APAGADA", "QWEN-CELULAR", "PROTOCOLO-IAS", "ECOSSISTEMA-IA", "LINUX-A12", "CONTROLES-GAMESIR", "OBS-ESTUDIO",
     "ADGUARD-PC", "COPIA-E-RESTAURAR", "MAPAS-LUGARES", "GUIA-IA-NO-CELULAR", "PLAY-PARA-FONTE", "WEBCAM-E-RECUPERACAO",
-    "PLANO-MATRIX", "CONFERENCIA-PEDIDOS", "ACESSO-REMOTO", "LICOES-MATRIX", "RECEITAS-ANDROID", "VOZ-OFFLINE")]
+    "PLANO-MATRIX", "CONFERENCIA-PEDIDOS", "ACESSO-REMOTO", "LICOES-MATRIX", "RECEITAS-ANDROID", "VOZ-OFFLINE", "MATRIX-ALINHAMENTO")]
 PASTAS_FORA_MEMORIA = {"qwen-celular", "hermes-trabalho", "node_modules", ".git", "backups", "backup", "diagnostico", "venv", ".venv"}
 _RE_ALUNO = re.compile(r"(?i)mapao|mapão|aluno|alunos|boletim|notas[ _-]?(finais|bimestr)|\bRA\s*[:=]?\s*\d{6,}")
 _RE_PESSOAL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+|\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\bRA\s*[:=]?\s*\d{6,}")  # linhas com isso saem
