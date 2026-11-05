@@ -173,6 +173,11 @@ def monta_previa():
 def espelha_no_clone(arquivos):
     if not (CLONE / ".git").exists():
         sys.exit(f"RECUSADO: o clone publico {CLONE} nao existe (gh repo clone {REPO} \"{CLONE}\").")
+    # 05/11: o 1o commit saiu com o e-mail pessoal da configuracao global do git (corrigido antes de abrir).
+    _, email = sh(["git", "config", "user.email"], cwd=CLONE)
+    if not email.strip().endswith("@users.noreply.github.com"):
+        sys.exit("RECUSADO: o autor dos commits do clone publico nao e o e-mail noreply do GitHub "
+                 "(git -C <clone> config user.email <id>+<usuario>@users.noreply.github.com).")
     cod, saida = sh(["git", "status", "--porcelain"], cwd=CLONE)
     if saida.strip():
         sys.exit("RECUSADO: o clone publico tem mudancas fora deste script:\n" + saida[:800])
