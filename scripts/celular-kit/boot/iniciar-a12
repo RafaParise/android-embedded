@@ -1,0 +1,27 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Termux:Boot roda isto quando o celular liga (copiado para ~/.termux/boot/): sobe o sshd (so 127.0.0.1) e o guarda da saida de internet, se ela estiver pedida.
+# NAO usa termux-wake-lock (gastaria bateria). Este script fica de pe de proposito: enquanto ha uma tarefa viva, o servico do Termux segue em primeiro plano
+# e o Android nao mata o sshd nem o guarda. Log: ~/.cache/saida/boot.log
+PATH="$HOME/bin:/data/data/com.termux/files/usr/bin:$PATH"
+LOG="$HOME/.cache/saida/boot.log"
+mkdir -p "$HOME/.cache/saida"
+{
+  echo "$(date '+%Y-%m-%d %H:%M:%S') boot: inicio"
+  pgrep -x sshd >/dev/null 2>&1 || sshd
+  if pgrep -x sshd >/dev/null 2>&1; then s="sshd ok"; else s="sshd NAO subiu"; fi
+  g=$(saida guarda 2>&1); rc=$?   # rc 1 = saida nao pedida (nada a vigiar) ou guarda que nao subiu: o texto de $g diz qual
+  echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $s; guarda: rc=$rc $(printf '%s' "$g" | tr '\n' ' ')"
+  command -v guarda >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: vigia de arquivos: $(guarda ligar 2>&1 | tr '\n' ' ')"
+} >> "$LOG" 2>&1
+# memoria do Matrix: se alimenta sozinha (aparelho, apps, rotina, projetos do cartao e, com o PC no ar, o que o Claude fez)
+alimenta() { command -v memoria >/dev/null 2>&1 && nice -n 15 timeout 600 memoria atualizar --auto >/dev/null 2>&1; }
+( sleep 300; alimenta ) &
+hora=0
+while :; do
+  sleep 3600
+  hora=$((hora + 1)); [ $((hora % 6)) = 0 ] && alimenta
+  # de hora em hora: se o Android tiver matado um dos dois, sobe de novo (nao faz rede e nao acorda o aparelho: o sleep congela com a CPU parada)
+  pgrep -x sshd >/dev/null 2>&1 || sshd
+  saida guarda >/dev/null 2>&1
+  command -v guarda >/dev/null 2>&1 && guarda ligar >/dev/null 2>&1
+done

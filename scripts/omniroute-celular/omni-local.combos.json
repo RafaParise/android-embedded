@@ -1,0 +1,185 @@
+[
+ {
+  "name": "codigo",
+  "strategy": "priority",
+  "enabled": true,
+  "models": [
+   {
+    "id": "codigo-model-1-nvidia-nvidia-nemotron-3-ultra-550b-a55b",
+    "kind": "model",
+    "model": "nvidia/nvidia/nemotron-3-ultra-550b-a55b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "codigo-model-2-nvidia-nvidia-nemotron-3-5-lightning-30b-a3b",
+    "kind": "model",
+    "model": "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "codigo-model-3-gemini-gemini-3-flash-preview",
+    "kind": "model",
+    "model": "gemini/gemini-3-flash-preview",
+    "providerId": "gemini",
+    "weight": 0
+   },
+   {
+    "id": "codigo-model-4-nvidia-meta-muse-glimmer-30b",
+    "kind": "model",
+    "model": "nvidia/meta/muse-glimmer-30b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "codigo-model-5-nvidia-google-diffusiongemma-26b-a4b-it",
+    "kind": "model",
+    "model": "nvidia/google/diffusiongemma-26b-a4b-it",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "codigo-model-6-openrouter-nvidia-nemotron-3-5-super-vl-free",
+    "kind": "model",
+    "model": "openrouter/nvidia/nemotron-3.5-super-vl:free",
+    "providerId": "openrouter",
+    "weight": 0
+   },
+   {
+    "id": "codigo-model-7-openrouter-nvidia-nemotron-3-5-lightning-free",
+    "kind": "model",
+    "model": "openrouter/nvidia/nemotron-3.5-lightning:free",
+    "providerId": "openrouter",
+    "weight": 0
+   }
+  ],
+  "config": {
+   "maxRetries": 2,
+   "failoverBeforeRetry": true,
+   "compressionMode": "rtk"
+  }
+ },
+ {
+  "name": "auditoria",
+  "strategy": "priority",
+  "enabled": true,
+  "models": [
+   {
+    "id": "auditoria-model-1-nvidia-meta-muse-glimmer-30b",
+    "kind": "model",
+    "model": "nvidia/meta/muse-glimmer-30b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "auditoria-model-2-nvidia-nvidia-nemotron-3-ultra-550b-a55b",
+    "kind": "model",
+    "model": "nvidia/nvidia/nemotron-3-ultra-550b-a55b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "auditoria-model-3-nvidia-nvidia-nemotron-3-5-lightning-30b-a3b",
+    "kind": "model",
+    "model": "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "auditoria-model-4-nvidia-google-diffusiongemma-26b-a4b-it",
+    "kind": "model",
+    "model": "nvidia/google/diffusiongemma-26b-a4b-it",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "auditoria-model-5-openrouter-nvidia-nemotron-3-5-lightning-free",
+    "kind": "model",
+    "model": "openrouter/nvidia/nemotron-3.5-lightning:free",
+    "providerId": "openrouter",
+    "weight": 0
+   },
+   {
+    "id": "auditoria-model-6-openrouter-nvidia-nemotron-3-nano-omni-30b-a3b-reasoning-free",
+    "kind": "model",
+    "model": "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "providerId": "openrouter",
+    "weight": 0
+   },
+   {
+    "id": "auditoria-model-7-nvidia-nvidia-nemotron-3-nano-omni-30b-a3b-reasoning",
+    "kind": "model",
+    "model": "nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "providerId": "nvidia",
+    "weight": 0
+   }
+  ],
+  "config": {
+   "maxRetries": 2,
+   "failoverBeforeRetry": true,
+   "compressionMode": "lite"
+  }
+ },
+ {
+  "name": "rapido",
+  "strategy": "p2c",
+  "enabled": true,
+  "models": [
+   {
+    "id": "rapido-model-1-nvidia-nvidia-nemotron-3-5-lightning-30b-a3b",
+    "kind": "model",
+    "model": "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+    "providerId": "nvidia",
+    "weight": 0
+   },
+   {
+    "id": "rapido-model-2-gemini-gemini-3-flash-preview",
+    "kind": "model",
+    "model": "gemini/gemini-3-flash-preview",
+    "providerId": "gemini",
+    "weight": 0
+   },
+   {
+    "id": "rapido-model-3-openrouter-nvidia-nemotron-3-5-lightning-free",
+    "kind": "model",
+    "model": "openrouter/nvidia/nemotron-3.5-lightning:free",
+    "providerId": "openrouter",
+    "weight": 0
+   },
+   {
+    "id": "rapido-model-4-openrouter-cohere-north-mini-code-free",
+    "kind": "model",
+    "model": "openrouter/cohere/north-mini-code:free",
+    "providerId": "openrouter",
+    "weight": 0
+   },
+   {
+    "id": "rapido-model-5-ddgw-mistral-small-2603",
+    "kind": "model",
+    "model": "ddgw/mistral-small-2603",
+    "providerId": "ddgw",
+    "weight": 0
+   },
+   {
+    "id": "rapido-model-6-gemini-gemini-3-1-flash-lite",
+    "kind": "model",
+    "model": "gemini/gemini-3.1-flash-lite",
+    "providerId": "gemini",
+    "weight": 0
+   },
+   {
+    "id": "rapido-model-7-nvidia-google-gemma-4-31b-it",
+    "kind": "model",
+    "model": "nvidia/google/gemma-4-31b-it",
+    "providerId": "nvidia",
+    "weight": 0
+   }
+  ],
+  "config": {
+   "maxRetries": 2,
+   "failoverBeforeRetry": true,
+   "compressionMode": "standard"
+  }
+ }
+]

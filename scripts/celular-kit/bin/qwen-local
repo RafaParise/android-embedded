@@ -1,0 +1,18 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Qwen Code com o modelo PEQUENO que roda dentro do celular (Qwen2.5 0,5B, llama.cpp). So conversa curta e rascunho:
+# NAO serve para editar codigo (o modelo e pequeno demais e a primeira resposta leva minutos).
+# Uso: qwen-local [pasta] [opcoes do qwen...]
+alvo="${1:-$PWD}"
+[ $# -gt 0 ] && shift
+[ -d "$alvo" ] || { echo "A pasta nao existe: $alvo"; exit 1; }
+if ! curl -sf -m 3 http://127.0.0.1:8080/health > /dev/null; then
+  echo "Iniciando o servidor local do modelo (llama-server, so em 127.0.0.1)..."
+  setsid -f llama-server -m ~/modelos/qwen.gguf --host 127.0.0.1 --port 8080 -c 8192 -t 4 > ~/llama.log 2> ~/llama.err
+  for i in $(seq 1 40); do
+    curl -sf -m 2 http://127.0.0.1:8080/health > /dev/null && break
+    sleep 2
+  done
+fi
+curl -sf -m 3 http://127.0.0.1:8080/health > /dev/null || { echo "O servidor local nao subiu: veja ~/llama.err"; exit 1; }
+cd "$alvo" || exit 1
+exec qwen --model qwen "$@"

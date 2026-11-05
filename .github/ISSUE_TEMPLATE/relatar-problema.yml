@@ -1,0 +1,45 @@
+name: Relatar um problema
+description: Um script ou o Matrix não funciona como devia.
+title: "[Problema] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por avisar! Antes, rode `python scripts/auditoria.py` (só lê): ela costuma apontar a causa.
+
+        **As issues são públicas.** Não cole e-mail, telefone, nomes de contatos, nome da rede Wi-Fi, IP da Tailscale, chaves ou tokens. Mascare com `***`.
+  - type: input
+    id: celular
+    attributes:
+      label: Celular e Android
+      placeholder: "Galaxy A12 SM-A125M, Android 12"
+    validations:
+      required: true
+  - type: input
+    id: script
+    attributes:
+      label: Script e comando
+      placeholder: "python scripts/saude.py --online"
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Passo a passo
+      placeholder: |
+        1. Rodei ...
+        2. Apareceu ...
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: O que eu esperava e o que aconteceu
+    validations:
+      required: true
+  - type: textarea
+    id: saida
+    attributes:
+      label: Saída do comando (mascarada)
+      render: text

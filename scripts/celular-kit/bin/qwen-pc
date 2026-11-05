@@ -1,0 +1,21 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Abre o Qwen Code com o cerebro do PC (Llama 3.2 3B no Ollama: o unico modelo local testado que devolve chamada de ferramenta), pelo cabo USB.
+# Medido em 30/10: o Qwen2.5-Coder 7B responde a ferramenta como texto (nao executa nada) e a 1a resposta levou 23 min.
+# Uso: qwen-pc [pasta-do-projeto] [opcoes do qwen...]      ex.: qwen-pc ~/projetos/meuapp
+MODELO=llama3.2-32k
+alvo="${1:-$PWD}"
+[ $# -gt 0 ] && shift
+[ -d "$alvo" ] || { echo "A pasta nao existe: $alvo"; exit 1; }
+if ! curl -sf -m 6 http://127.0.0.1:11435/api/tags | grep -q "$MODELO"; then
+  echo "O Ollama do PC nao respondeu em 127.0.0.1:11435 (ou nao tem o modelo $MODELO)."
+  echo "Sem cabo: use  ia pc  (pela Tailscale). Pelo cabo, a ponte do Ollama escuta em TODAS as interfaces do celular e sem senha:"
+  echo "so o Claude Code do PC abre, e SO com o \"sim\" do Rafael no dia (pwsh scripts\termux.ps1 -Pontes), e fecha ao terminar (-FecharPontes)."
+  echo "Sem o PC, use: qwen-local (modelo pequeno, so para conversa curta)."
+  echo "Dica: o comando  ia  escolhe o melhor cerebro ao alcance e liga as pontes sozinho (guia: ~/GUIA-IA.md). Digite:  ia"
+  exit 1
+fi
+echo "Modelo pequeno (3B): executa ferramentas, mas so serve para tarefa curta e simples; se ele repetir a mesma acao sem avancar, aperte Esc e use /clear (para trabalho serio use qwen-nuvem)."
+echo "Aquecendo o modelo no PC (a 1a resposta do Qwen Code processa ~12 mil tokens: alguns minutos; as proximas vem bem mais rapido)..."
+curl -s -m 120 http://127.0.0.1:11435/api/generate -d "{\"model\":\"$MODELO\",\"keep_alive\":\"30m\"}" >/dev/null 2>&1
+cd "$alvo" || exit 1
+exec qwen --model "$MODELO" "$@"

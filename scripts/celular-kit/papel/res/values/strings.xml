@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nome">Papel rolante</string>
+    <string name="descricao">Arraste para o lado para ver o resto da imagem; deitado, aparece inteira.</string>
+    <string name="sincronia_nome">Papel rolante: seguir as páginas</string>
+    <string name="sincronia_descricao">Faz o papel de parede andar junto com as páginas da tela inicial da Samsung. Recebe só o aviso de rolagem da tela inicial; não lê o conteúdo de nenhuma tela.</string>
+</resources>

@@ -1,0 +1,234 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# saida - liga e desliga a SAIDA DE INTERNET PELO PC (Tailscale "exit node") e VIGIA: se o PC some, ou se a internet para de
+# passar por ele, o guarda desliga a saida e a internet volta sozinha (direto pelo Wi-Fi ou pelos dados); quando o PC volta,
+# o guarda religa a saida, conferindo antes que a internet passa. Decidido em 01/11 (memoria/VPN-SEMPRE-ATIVA.md).
+#   saida ligar [--sem-lan] [--vigilia]       confere o PC e a internet, liga a saida e deixa o guarda vigiando
+#   saida desligar                            desliga a saida e para o guarda
+#   saida status                              o que esta ligado, o guarda, o PC e a internet
+#   saida guarda                              (re)inicia so o guarda (depois de reiniciar o Termux ou o celular)
+#   saida vigilia ligar|desligar              segura (ou solta) o celular acordado para o guarda vigiar com a tela apagada (gasta bateria; sem ela ele age quando o aparelho acorda)
+#   saida log [N]                             ultimas N linhas do registro (padrao 15)
+# O guarda so religa o que ELE desligou, e so enquanto a saida estiver pedida ("saida ligar"). Se voce mudar a saida pelo app
+# da Tailscale, o guarda nao sabe: use sempre "saida desligar". Nao mexe em nenhum ajuste do Android (so manda ao app da
+# Tailscale a mesma intencao que o botao "Exit node" manda). Variaveis (todas opcionais): SAIDA_PC_IP, SAIDA_PORTA, SAIDA_NO
+# (nome do PC na Tailscale), SAIDA_INTERVALO, SAIDA_FALHAS, SAIDA_OKS, SAIDA_ESPERA, SAIDA_PAUSA, SAIDA_TEMPO, SAIDA_ESPERA_MAX,
+# SAIDA_CONFERE (endereco que devolve 204), SAIDA_RUN (pasta de estado).
+
+PC_IP="${SAIDA_PC_IP:-100.64.0.1}"
+PORTA="${SAIDA_PORTA:-20130}"
+NO="${SAIDA_NO:-rafaparise}"
+RUN="${SAIDA_RUN:-$HOME/.cache/saida}"
+CONFERE="${SAIDA_CONFERE:-http://connectivitycheck.gstatic.com/generate_204}"
+num() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
+INTERVALO=$(num "${SAIDA_INTERVALO:-}" 15)   # segundos entre um teste e outro
+FALHAS=$(num "${SAIDA_FALHAS:-}" 2)          # testes seguidos sem internet antes de suspender a saida
+OKS=$(num "${SAIDA_OKS:-}" 2)                # testes seguidos com o PC respondendo antes de religar
+ESPERA=$(num "${SAIDA_ESPERA:-}" 8)          # segundos para a Tailscale trocar de rota depois da intencao
+PAUSA=$(num "${SAIDA_PAUSA:-}" 2)            # segundos entre as conferencias da internet depois de religar
+TEMPO=$(num "${SAIDA_TEMPO:-}" 5)            # segundos de cada teste de rede (0 no curl seria "sem limite")
+ESPERA_MAX=$(num "${SAIDA_ESPERA_MAX:-}" 900) # maior pausa entre duas tentativas de religar que nao deram certo
+[ "$TEMPO" -ge 1 ] || TEMPO=5
+[ "$FALHAS" -ge 1 ] || FALHAS=1
+[ "$OKS" -ge 1 ] || OKS=1
+
+case "$NO" in ''|*[!A-Za-z0-9._-]*) echo "SAIDA_NO invalido: so letras, numeros, ponto, traco e sublinhado."; exit 2 ;; esac
+[ "${#NO}" -le 63 ] || { echo "SAIDA_NO invalido: mais de 63 caracteres."; exit 2; }
+case "$PC_IP" in ''|*[!0-9.]*) echo "SAIDA_PC_IP invalido."; exit 2 ;; esac
+case "$PORTA" in ''|*[!0-9]*) echo "SAIDA_PORTA invalida."; exit 2 ;; esac
+
+mkdir -p "$RUN" && chmod 700 "$RUN" 2>/dev/null
+LOG="$RUN/saida.log"
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+
+log() {
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"
+  if [ "$(wc -l < "$LOG" 2>/dev/null || echo 0)" -gt 300 ]; then tail -n 150 "$LOG" > "$LOG.novo" && mv "$LOG.novo" "$LOG"; fi
+}
+le_num() { local v; v=$(cat "$RUN/$1" 2>/dev/null); case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac; }
+
+# a internet so conta se o endereco devolver 204 (uma pagina de login de Wi-Fi devolve 200 ou 302 e NAO conta)
+internet_ok() { [ "$(curl -s -o /dev/null -m "$TEMPO" --connect-timeout "$TEMPO" -w '%{http_code}' "$CONFERE" 2>/dev/null)" = 204 ]; }
+# o PC "responde" quando a conexao chega a ele pela tailnet: o tailscaled do PC aceita a conexao mesmo com a ponte-pc parada (cod. 52 e 56)
+pc_responde() {
+  curl -s -o /dev/null -m "$TEMPO" --connect-timeout "$TEMPO" "http://$PC_IP:$PORTA/saude" >/dev/null 2>&1
+  case $? in 0|22|52|56) return 0 ;; *) return 1 ;; esac
+}
+# $1 = nome do PC na Tailscale ("" = sem saida), $2 = true|false (manter a rede local acessivel)
+manda_saida() {
+  local o
+  o=$(am broadcast -n com.tailscale.ipn/.IPNReceiver -a com.tailscale.ipn.USE_EXIT_NODE --es exitNode "$1" --ez allowLanAccess "$2" 2>&1)
+  case "$o" in *"Broadcast completed"*) return 0 ;; esac
+  log "o app da Tailscale nao aceitou a intencao (exitNode='$1'): $(printf '%s' "$o" | tr '\n' ' ' | cut -c1-120)"
+  return 1
+}
+# espera a rota trocar e confere a internet ate 3 vezes
+internet_depois() { sleep "$ESPERA"; internet_ok && return 0; sleep "$PAUSA"; internet_ok && return 0; sleep "$PAUSA"; internet_ok; }
+prende_vigilia() { command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1; return 0; }
+solta_vigilia() { command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock >/dev/null 2>&1; return 0; }
+
+# imprime o pid do guarda se ele estiver de pe (confere o nome no /proc: depois de um reinicio o numero pode ser de outro programa)
+laco_pid() {
+  local p c
+  p=$(cat "$RUN/laco.pid" 2>/dev/null)
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$p" 2>/dev/null || return 1
+  c=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+  case "$c" in *saida*laco*) echo "$p"; return 0 ;; esac
+  return 1
+}
+inicia_laco() {
+  laco_pid >/dev/null && return 0
+  nohup bash "$SELF" laco </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do laco_pid >/dev/null && return 0; sleep 0.2; done
+  return 1
+}
+para_laco() {
+  local p i
+  if p=$(laco_pid); then
+    kill "$p" 2>/dev/null
+    for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
+    kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+  fi
+  rm -f "$RUN/laco.pid"
+  solta_vigilia
+}
+
+# UM passo do guarda (o laco chama este de tempos em tempos; os testes chamam direto)
+ciclo() {
+  [ -f "$RUN/desejada" ] || return 0
+  local lan agora n o e prox
+  lan=$(cat "$RUN/desejada" 2>/dev/null); [ "$lan" = false ] || lan=true
+  agora=$(date +%s)
+  if [ ! -f "$RUN/suspensa" ]; then
+    # saida em uso: se a internet parar por FALHAS testes seguidos, desliga a saida (a internet volta direto)
+    if internet_ok; then echo 0 > "$RUN/falhas"; return 0; fi
+    n=$(( $(le_num falhas) + 1 )); echo "$n" > "$RUN/falhas"
+    [ "$n" -ge "$FALHAS" ] || return 0
+    if manda_saida "" "$lan"; then
+      echo "$agora" > "$RUN/suspensa"; echo 0 > "$RUN/oks"; echo 0 > "$RUN/falhas"; rm -f "$RUN/proxima" "$RUN/espera"
+      log "sem internet em $n testes seguidos: saida pelo PC SUSPENSA (a internet sai direto ate o PC voltar)"
+    fi
+    return 0
+  fi
+  # saida suspensa pelo guarda: espera o PC responder OKS vezes seguidas e so entao tenta religar
+  if pc_responde; then o=$(( $(le_num oks) + 1 )); else o=0; fi
+  echo "$o" > "$RUN/oks"
+  [ "$o" -ge "$OKS" ] || return 0
+  prox=$(le_num proxima); [ "$agora" -ge "$prox" ] || return 0
+  if manda_saida "$NO" "$lan" && internet_depois; then
+    rm -f "$RUN/suspensa" "$RUN/proxima" "$RUN/espera"; echo 0 > "$RUN/falhas"
+    log "PC de volta: saida pelo PC RELIGADA"
+  else
+    manda_saida "" "$lan"
+    e=$(( $(le_num espera) * 2 )); [ "$e" -ge 30 ] || e=30; [ "$e" -le "$ESPERA_MAX" ] || e=$ESPERA_MAX
+    echo "$e" > "$RUN/espera"; echo $(( agora + e )) > "$RUN/proxima"; echo 0 > "$RUN/oks"
+    log "o PC respondeu, mas a internet nao passou pela saida: desfeito; nova tentativa em ${e}s"
+  fi
+}
+
+laco() {
+  local S
+  echo $$ > "$RUN/laco.pid"
+  trap '[ -n "$S" ] && kill "$S" 2>/dev/null; rm -f "$RUN/laco.pid"; exit 0' TERM INT
+  log "guarda iniciado (pid $$, um teste a cada ${INTERVALO}s)"
+  [ -f "$RUN/vigilia" ] && prende_vigilia
+  while [ -f "$RUN/desejada" ]; do
+    ciclo
+    sleep "$INTERVALO" & S=$!
+    wait "$S"
+  done
+  rm -f "$RUN/laco.pid"
+  log "guarda encerrado"
+}
+
+cmd_ligar() {
+  local lan=true vig=0 a
+  for a in "$@"; do
+    case "$a" in
+      --sem-lan) lan=false ;;
+      --vigilia) vig=1 ;;
+      *) echo "Opcao desconhecida: $a (use: saida ligar [--sem-lan] [--vigilia])"; return 2 ;;
+    esac
+  done
+  if ! pc_responde; then echo "O PC nao respondeu pela Tailscale ($PC_IP): ligar a saida deixaria o celular sem internet. Nada foi mudado."; return 1; fi
+  if ! internet_ok; then echo "O celular ja esta sem internet agora: nao da para testar a saida. Nada foi mudado."; return 1; fi
+  if ! manda_saida "$NO" "$lan"; then echo "O app da Tailscale nao aceitou o pedido (veja: saida log). Nada foi mudado."; return 1; fi
+  if ! internet_depois; then
+    manda_saida "" "$lan"
+    log "ligar: a internet nao passou pelo PC; desfeito"
+    echo "A internet nao passou pelo PC: DESFEITO (a internet segue direta). Causa mais provavel: o painel da Tailscale ainda nao aprovou o PC como saida (login.tailscale.com/admin/machines)."
+    return 1
+  fi
+  printf '%s\n' "$lan" > "$RUN/desejada"
+  rm -f "$RUN/suspensa" "$RUN/proxima" "$RUN/espera"; echo 0 > "$RUN/falhas"; echo 0 > "$RUN/oks"
+  if [ "$vig" = 1 ]; then : > "$RUN/vigilia"; else rm -f "$RUN/vigilia"; fi
+  # com o guarda ja de pe, so o inicio do laco prendia o wake lock: prende ou solta aqui para o aviso abaixo ser verdade
+  if laco_pid >/dev/null; then if [ "$vig" = 1 ]; then prende_vigilia; else solta_vigilia; fi; fi
+  log "saida pelo PC ligada por voce (rede local: $lan, vigilia: $vig)"
+  inicia_laco || { echo "A saida ligou, mas o guarda nao subiu (veja: saida log). Rode: saida guarda"; return 1; }
+  echo "Saida pelo PC LIGADA. O guarda vigia: se o PC sumir, a internet volta sozinha (direto); quando o PC voltar, ele religa."
+  if [ "$vig" = 1 ]; then echo "Vigilia ligada: o celular nao dorme de vez para o guarda vigiar com a tela apagada (gasta bateria; para soltar: saida vigilia desligar)."; fi
+}
+
+cmd_desligar() {
+  rm -f "$RUN/desejada" "$RUN/suspensa" "$RUN/proxima" "$RUN/espera" "$RUN/falhas" "$RUN/oks"
+  para_laco
+  if manda_saida "" true; then
+    log "saida pelo PC desligada por voce"
+    echo "Saida pelo PC DESLIGADA: a internet sai direto pelo Wi-Fi ou pelos dados. O guarda parou."
+  else
+    echo "O guarda parou, mas o app da Tailscale nao aceitou o pedido (veja: saida log). Escolha Exit node > None no app da Tailscale."
+    return 1
+  fi
+}
+
+cmd_guarda() {
+  if [ ! -f "$RUN/desejada" ]; then echo "A saida nao esta pedida: nada para vigiar (use: saida ligar)."; return 1; fi
+  inicia_laco && echo "Guarda de pe." || { echo "O guarda nao subiu (veja: saida log)."; return 1; }
+}
+
+cmd_vigilia() {
+  case "$1" in
+    ligar) : > "$RUN/vigilia"; if laco_pid >/dev/null; then prende_vigilia; fi; echo "Vigilia LIGADA: o celular nao dorme de vez (gasta bateria)." ;;
+    desligar) rm -f "$RUN/vigilia"; solta_vigilia; echo "Vigilia DESLIGADA: com a tela apagada o guarda pode dormir junto." ;;
+    *) echo "Uso: saida vigilia ligar|desligar"; return 2 ;;
+  esac
+}
+
+cmd_status() {
+  local p t
+  if [ -f "$RUN/desejada" ]; then echo "Saida pelo PC: PEDIDA (ligada por voce)"; else echo "Saida pelo PC: nao pedida (para ligar: saida ligar)"; fi
+  if [ -f "$RUN/suspensa" ]; then
+    t=$(( $(date +%s) - $(le_num suspensa) ))
+    echo "  >> SUSPENSA pelo guarda ha ${t}s: a internet sai direto; ele religa quando o PC voltar"
+  fi
+  if p=$(laco_pid); then echo "Guarda: rodando (pid $p, um teste a cada ${INTERVALO}s)"
+  elif [ -f "$RUN/desejada" ]; then echo "Guarda: PARADO (rode: saida guarda)"
+  else echo "Guarda: parado"; fi
+  if [ -f "$RUN/vigilia" ]; then echo "Vigilia (celular acordado): ligada"; else echo "Vigilia (celular acordado): desligada"; fi
+  if pc_responde; then echo "PC pela Tailscale: responde"; else echo "PC pela Tailscale: NAO responde"; fi
+  if internet_ok; then echo "Internet agora: ok"; else echo "Internet agora: SEM"; fi
+  return 0
+}
+
+cmd_log() {
+  local n; n=$(num "$1" 15); [ "$n" -ge 1 ] || n=15
+  if [ -s "$LOG" ]; then tail -n "$n" "$LOG"; else echo "(registro vazio)"; fi
+}
+
+uso() { sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'; }
+
+case "${1:-}" in
+  ligar) shift; cmd_ligar "$@" ;;
+  desligar) cmd_desligar ;;
+  status) cmd_status ;;
+  guarda) cmd_guarda ;;
+  vigilia) shift; cmd_vigilia "$@" ;;
+  log) shift; cmd_log "$@" ;;
+  laco) laco ;;
+  ciclo) ciclo ;;
+  ajuda|-h|--help) uso ;;
+  *) uso; exit 2 ;;
+esac

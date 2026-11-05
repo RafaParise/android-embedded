@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="br.embeeded.papel">
+    <uses-feature android:name="android.software.live_wallpaper" android:required="true" />
+    <!-- so para desenhar os icones dos apps da tela inicial (Icones.java): nenhuma permissao, so a lista de apps com icone -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+    <application android:label="@string/nome" android:allowBackup="false" android:hasCode="true">
+        <service android:name=".Papel"
+            android:label="@string/nome"
+            android:exported="true"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/papel" />
+        </service>
+        <service android:name=".Sincronia"
+            android:label="@string/sincronia_nome"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/sincronia" />
+        </service>
+        <!-- exportado, mas so quem tem DUMP (o adb) consegue chamar -->
+        <receiver android:name=".Icones" android:exported="true" android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

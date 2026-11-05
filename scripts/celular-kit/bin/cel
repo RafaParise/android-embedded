@@ -1,0 +1,447 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# cel - a mao do Qwen (e do Rafael) no proprio celular, sem root e sem PC: o adb do Termux ligado ao proprio aparelho pela depuracao sem fio.
+#   cel status                      o que esta ligado e se a conexao com o sistema esta de pe
+#   cel conectar                    liga a conexao (religa a depuracao sem fio se o Termux tiver a permissao); `cel parear PORTA CODIGO` so na 1a vez
+#   cel wifi ligar|desligar|reiniciar · cel bluetooth ligar|desligar · cel dados ligar|desligar · cel aviao ligar|desligar
+#   cel internet reiniciar          modo aviao por 4 s (derruba e religa Wi-Fi e dados)
+#   cel tela apagar|acender|status  escurece SEM bloquear (depuracao segue; acende com dois toques ou volume para cima)
+#   cel economia-dados ligar|desligar|status   Economia de dados do Android (sem dado em segundo plano no 4G; nao comprime)
+#   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados em segundo plano
+#   cel abrir TELA | cel telas      abre a tela de configuracao (wifi, bluetooth, tela, som, bateria, apps, armazenamento, desenvolvedor...)
+#   cel abrir-app PACOTE · cel apps [texto] · cel procurar TEXTO (arquivos, apps e configuracoes)
+#   cel tv                          espelhar na TV: abre a transmissao do Android e diz que apps de espelhamento existem
+#   cel microfone sempre|gravar|desligado|mudo|ligado|status
+#   cel depuracao manter            mantem a depuracao USB e sem fio ligadas · cel sh "comando"  (qualquer comando do sistema, como o adb shell)
+#   OPERAR APPS: cel ler [TEXTO]    lista numerada do que esta na tela (textos, botoes, campos e o centro de cada um)
+#   cel tocar N | cel tocar "texto" | cel tocar X Y   toca (RECUSA botao sem volta: apagar, desinstalar, pagar, permitir depuracao...)
+#   cel digitar "texto" (sem acento) · cel rolar baixo|cima|direita|esquerda · cel tecla voltar|inicio|recentes|enter|apagar|tab
+# Conexao: porta 5555 do adb (qualquer rede, ate dados moveis; cai ao reiniciar) ou a Depuracao por Wi-Fi; sem nenhuma, pede ao PC.
+# A chave do adb fica em ~/.android (so o Termux le). Nunca copie para fora do celular.
+set -u
+DIR=/data/local/tmp
+DEX="$DIR/tela.dex"
+CONEXAO="$HOME/.cache/cel-conexao"
+mkdir -p "$HOME/.cache"
+
+tem_adb() { command -v adb >/dev/null 2>&1 || { echo "Falta o adb no Termux (pacote android-tools): peca ao Claude do PC."; exit 1; }; }
+
+serial() { # o aparelho conectado a si mesmo, se houver
+  adb devices 2>/dev/null | awk -F'\t' '$2 == "device" && $1 ~ /:[0-9]+$/ {print $1; exit}'
+}
+
+reativa_depuracao() { # so funciona se o Rafael tiver dado ao Termux a permissao WRITE_SECURE_SETTINGS (uma vez, pelo PC)
+  [ "$(settings get global adb_wifi_enabled 2>/dev/null)" = 1 ] && return 0
+  settings put global adb_wifi_enabled 1 >/dev/null 2>&1 && sleep 3 && return 0
+  return 1
+}
+
+PORTA="$HOME/.cache/cel-porta"
+porta_mdns() { # o adb do Termux nao tem mDNS e a porta da depuracao sem fio muda: pergunta ao proprio Android (mDNS pelo Wi-Fi, ~0,1 s)
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - <<'@@PY@@' 2>/dev/null
+import fcntl, socket, struct, time
+# IP do Wi-Fi por ioctl (o Android 11+ esconde o `ip addr` dos apps); a pergunta sai por ele, e nao pela VPN
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+eu = socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x8915, struct.pack("256s", b"wlan0"))[20:24])
+s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(eu))
+s.bind((eu, 0)); s.settimeout(0.5)
+
+def nome(d, i):
+    fim = None
+    while d[i]:
+        if d[i] & 0xC0 == 0xC0:
+            fim = fim or i + 2; i = ((d[i] & 0x3F) << 8) | d[i + 1]
+        else:
+            i += 1 + d[i]
+    return fim or i + 1
+
+q = b"".join(bytes([len(x)]) + x.encode() for x in "_adb-tls-connect._tcp.local".split(".")) + b"\0"
+pedido = struct.pack(">6H", 0, 0, 1, 0, 0, 0) + q + struct.pack(">HH", 12, 0x8001)
+for _ in range(3):
+    s.sendto(pedido, ("224.0.0.251", 5353))
+    limite = time.time() + 1
+    while time.time() < limite:
+        try:
+            d, quem = s.recvfrom(9000)
+        except socket.timeout:
+            break
+        if quem[0] != eu:   # so a resposta do PROPRIO aparelho: nunca a de outro celular na mesma rede
+            continue
+        _, _, qd, an, ns, ar = struct.unpack(">6H", d[:12]); i = 12
+        for _ in range(qd):
+            i = nome(d, i) + 4
+        for _ in range(an + ns + ar):
+            i = nome(d, i); tipo, _, _, tam = struct.unpack(">HHIH", d[i:i + 10]); i += 10
+            if tipo == 33:
+                print(struct.unpack(">H", d[i + 4:i + 6])[0]); raise SystemExit
+            i += tam
+@@PY@@
+}
+tenta() { # tenta conectar numa porta local; guarda a porta que deu certo
+  timeout 10 adb connect "127.0.0.1:$1" 2>/dev/null | grep -q "connected to" || return 1
+  s=$(serial); [ -n "$s" ] || return 1
+  echo "$1" > "$PORTA"; echo "$s" > "$CONEXAO"; return 0
+}
+pede_ao_pc() { # $1 = acao da lista fechada da ponte do PC; o token vai pela entrada padrao do curl, nunca na linha de comando
+  local tk url="${PONTE_URL:-http://${IA_PC_IP:-100.64.0.1}:20130}"
+  tk=$(grep -m1 '^PONTE_PC_TOKEN=' "$HOME/.qwen/.env" 2>/dev/null | cut -d= -f2-)
+  [ -n "$tk" ] && command -v curl >/dev/null 2>&1 || return 1
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 -m 8 "$url/saude" 2>/dev/null)" = 200 ] || return 1
+  printf 'header = "Authorization: Bearer %s"\n' "$tk" | curl -s -K - -m 60 -H 'Content-Type: application/json' -o /dev/null \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"acao_pc\",\"arguments\":{\"nome\":\"$1\"}}}" "$url/mcp" 2>/dev/null
+}
+PORTA_FIXA=5555
+fixa() { # porta 5555 (adb tcpip): vale em QUALQUER rede, inclusive dados moveis (autorizada pelo Rafael em 05/11); some ao reiniciar
+  timeout 10 adb connect "127.0.0.1:$PORTA_FIXA" 2>/dev/null | grep -q "connected to" || return 1
+  local s; s=$(adb devices 2>/dev/null | awk -F'\t' -v a="127.0.0.1:$PORTA_FIXA" '$1 == a && $2 == "device" {print $1}')
+  [ -n "$s" ] || { adb disconnect "127.0.0.1:$PORTA_FIXA" >/dev/null 2>&1; return 1; }
+  echo "$s" > "$CONEXAO"; return 0
+}
+liga_fixa() { # conectado pela Depuracao por Wi-Fi: liga a 5555 para depois valer tambem nos dados moveis
+  [ "${CEL_SEM_5555:-0}" = 1 ] && return 0
+  timeout 15 adb -s "$1" tcpip "$PORTA_FIXA" >/dev/null 2>&1 || return 0
+  for _ in 1 2 3 4 5; do sleep 2; fixa && return 0; done
+  return 0
+}
+conecta() {
+  tem_adb
+  local s p
+  s=$(serial)
+  [ -n "$s" ] && { echo "$s" > "$CONEXAO"; return 0; }
+  fixa && return 0
+  reativa_depuracao || true
+  p=$(cat "$PORTA" 2>/dev/null); case "$p" in ''|*[!0-9]*) ;; *) tenta "$p" && { liga_fixa "$(serial)"; return 0; } ;; esac
+  for _ in 1 2 3; do
+    p=$(timeout 10 bash -c "$(declare -f porta_mdns); porta_mdns")
+    case "$p" in ''|*[!0-9]*) ;; *) tenta "$p" && { liga_fixa "$(serial)"; return 0; } ;; esac
+    sleep 2
+  done
+  # Sem a 5555 e sem a Depuracao por Wi-Fi (o Android desliga as duas ao reiniciar; a de Wi-Fi tambem ao trocar de rede).
+  # O Termux nao consegue religar nenhuma (o `settings` e recusado para app): pede ao PC pela ponte. Com o cabo, o PC
+  # liga a 5555 (vale ate em dados moveis) e a Depuracao por Wi-Fi.
+  if pede_ao_pc depuracao-5555-ligar; then
+    for _ in 1 2 3 4; do sleep 2; fixa && return 0; done
+  fi
+  if pede_ao_pc depuracao-sem-fio-ligar; then
+    sleep 3
+    for _ in 1 2 3; do
+      p=$(timeout 10 bash -c "$(declare -f porta_mdns); porta_mdns")
+      case "$p" in ''|*[!0-9]*) ;; *) tenta "$p" && { liga_fixa "$(serial)"; return 0; } ;; esac
+      sleep 2
+    done
+  fi
+  return 1
+}
+
+TELA_CACHE="$HOME/.cache/cel-tela.json"
+# Le a arvore da tela (uiautomator) e guarda a lista em TELA_CACHE. E-mail e numero longo (telefone, CPF) saem mascarados:
+# o que o Matrix le pode ir a um modelo da nuvem. Nada disso vai para a memoria.
+PY_TELA=$(cat <<'@@PY@@'
+import json, re, sys, xml.etree.ElementTree as ET
+cache, filtro = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else "").lower()
+bruto = sys.stdin.read()
+if "<!DOCTYPE" in bruto or "<!ENTITY" in bruto:  # a arvore do uiautomator nunca tem isso: recusa (XXE e "bilhao de risadas")
+    print("Leitura estranha da tela; recusada."); raise SystemExit(2)
+try:
+    raiz = ET.fromstring(bruto)
+except ET.ParseError:
+    print("Nao consegui ler a tela."); raise SystemExit(2)
+def mascara(t):
+    t = re.sub(r"[\w.+-]+@[\w-]+\.[\w.]+", "[e-mail]", t)
+    return re.sub(r"\+?\d[\d ().-]{7,}\d", "[numero]", t)
+itens, pacote = [], ""
+for no in raiz.iter("node"):
+    pacote = pacote or no.get("package", "")
+    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", no.get("bounds", ""))
+    if not m:
+        continue
+    x1, y1, x2, y2 = map(int, m.groups())
+    if x2 <= x1 or y2 <= y1:
+        continue
+    texto = (no.get("text") or "").strip() or (no.get("content-desc") or "").strip()
+    rid = (no.get("resource-id") or "").split("/")[-1]
+    clic = no.get("clickable") == "true" or no.get("checkable") == "true"
+    campo = no.get("class", "").endswith("EditText")
+    if not texto and not (clic and rid) and not campo:
+        continue
+    rot = mascara(texto or rid or "campo")
+    itens.append({"x": (x1 + x2) // 2, "y": (y1 + y2) // 2, "b": [x1, y1, x2, y2], "rotulo": rot[:80],
+                  "id": rid, "clic": clic, "campo": campo, "marcado": no.get("checked") == "true"})
+for i, it in enumerate(itens, 1):
+    it["n"] = i
+json.dump({"pacote": pacote, "itens": itens}, open(cache, "w"))
+print("App na tela: " + (pacote or "?"))
+mostrados = 0
+for it in itens:
+    if filtro and filtro not in it["rotulo"].lower():
+        continue
+    tipo = "campo" if it["campo"] else ("botao" if it["clic"] else "texto")
+    print("%3d. %s [%s%s] (%d,%d)" % (it["n"], it["rotulo"], tipo, ", marcado" if it["marcado"] else "", it["x"], it["y"]))
+    mostrados += 1
+    if mostrados >= 80:
+        print("... (mais itens: cel ler TEXTO filtra)"); break
+@@PY@@
+)
+# Decide o alvo de um toque e RECUSA botao sem volta (o Rafael toca com a mao dele). Saida: "OK:X Y rotulo" ou "PERIGO:rotulo".
+PY_ALVO=$(cat <<'@@PY@@'
+import json, re, sys, unicodedata
+cache, modo, valor = sys.argv[1:4]
+try:
+    d = json.load(open(cache))
+except (OSError, ValueError):
+    print("NADA"); raise SystemExit
+itens = d.get("itens", [])
+def limpo(t):
+    return unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode().lower()
+PERIGO = re.compile(r"desinstal|excluir|apagar|remover|formatar|redefinir|restaurar (o )?padr|restaurar config|limpar (os )?dados|"
+                    r"limpar armazen|pagar|pagamento|comprar|compra|assinar|assinatura|\bpix\b|transferir|transferencia|"
+                    r"enviar dinheiro|permitir depura|sempre permitir|desligar|reiniciar|uninstall|delete|erase|reset|"
+                    r"\bpay\b|\bbuy\b|purchase|subscribe|power off|restart|factory")
+TELA_PERIGOSA = re.compile(r"depuracao usb|usb debugging|impressao digital da chave rsa|rsa key fingerprint")  # so o aviso de autorizar depuracao trava a tela inteira
+if any(TELA_PERIGOSA.search(limpo(i["rotulo"])) for i in itens):
+    print("PERIGO:tela de autorizacao ou de apagar"); raise SystemExit
+alvo = None
+if modo == "numero":
+    alvo = next((i for i in itens if str(i["n"]) == valor), None)
+elif modo == "texto":
+    v = limpo(valor)
+    iguais = [i for i in itens if limpo(i["rotulo"]) == v] or [i for i in itens if v in limpo(i["rotulo"])]
+    alvo = (sorted(iguais, key=lambda i: not i["clic"]) or [None])[0]
+elif modo == "xy":
+    x, y = map(int, valor.split())
+    dentro = [i for i in itens if i["b"][0] <= x <= i["b"][2] and i["b"][1] <= y <= i["b"][3]]
+    for i in dentro:
+        if PERIGO.search(limpo(i["rotulo"] + " " + i["id"])):
+            print("PERIGO:" + i["rotulo"]); raise SystemExit
+    if dentro:
+        menor = min(dentro, key=lambda i: (i["b"][2] - i["b"][0]) * (i["b"][3] - i["b"][1]))
+        print("OK:%d %d %s" % (x, y, menor["rotulo"])); raise SystemExit
+    print("OK:%d %d ponto (%d,%d)" % (x, y, x, y)); raise SystemExit
+if not alvo:
+    print("NADA"); raise SystemExit
+if PERIGO.search(limpo(alvo["rotulo"] + " " + alvo["id"])):
+    print("PERIGO:" + alvo["rotulo"]); raise SystemExit
+print("OK:%d %d %s" % (alvo["x"], alvo["y"], alvo["rotulo"]))
+@@PY@@
+)
+le_tela() {
+  local x=""
+  for _ in 1 2 3; do
+    x=$(sh_ "uiautomator dump /data/local/tmp/cel-ui.xml >/dev/null 2>&1 && cat /data/local/tmp/cel-ui.xml" 2>/dev/null)
+    case "$x" in *"<hierarchy"*) break ;; esac
+    x=""; sleep 1
+  done
+  [ -n "$x" ] || { echo "Nao consegui ler a tela (o Android diz que ela nao parou de mexer). Tente de novo em 2 s."; return 2; }
+  printf '%s' "$x" | python3 -c "$PY_TELA" "$TELA_CACHE" "${1:-}"
+}
+acha_elemento() { # $1 = numero|texto|xy  $2 = valor
+  [ "$1" = xy ] && le_tela >/dev/null
+  python3 -c "$PY_ALVO" "$TELA_CACHE" "$1" "$2"
+}
+
+S=""
+precisa() {
+  conecta || {
+    echo "Sem conexao com o sistema: a porta 5555 caiu (o celular reiniciou?) e a Depuracao sem fio esta desligada."
+    echo "Resolve: Wi-Fi + Opcoes do desenvolvedor > Depuracao sem fio LIGADA (o cel religa a 5555 sozinho), ou o cabo no PC."
+    exit 2
+  }
+  S=$(serial)
+}
+sh_() { adb -s "$S" shell "$@"; }
+solto() { # sobrevive a queda da propria conexao (desligar o Wi-Fi derruba a depuracao sem fio)
+  sh_ "setsid nohup sh -c '$1' >/dev/null 2>&1 </dev/null &"
+}
+
+TELAS="wifi:android.settings.WIFI_SETTINGS bluetooth:android.settings.BLUETOOTH_SETTINGS rede:android.settings.WIRELESS_SETTINGS
+dados:android.settings.DATA_USAGE_SETTINGS vpn:android.settings.VPN_SETTINGS tela:android.settings.DISPLAY_SETTINGS som:android.settings.SOUND_SETTINGS
+bateria:android.intent.action.POWER_USAGE_SUMMARY apps:android.settings.MANAGE_APPLICATIONS_SETTINGS armazenamento:android.settings.INTERNAL_STORAGE_SETTINGS
+localizacao:android.settings.LOCATION_SOURCE_SETTINGS desenvolvedor:android.settings.APPLICATION_DEVELOPMENT_SETTINGS tv:android.settings.CAST_SETTINGS
+acessibilidade:android.settings.ACCESSIBILITY_SETTINGS data:android.settings.DATE_SETTINGS idioma:android.settings.LOCALE_SETTINGS
+seguranca:android.settings.SECURITY_SETTINGS privacidade:android.settings.PRIVACY_SETTINGS nfc:android.settings.NFC_SETTINGS
+notificacoes:android.settings.NOTIFICATION_SETTINGS teclado:android.settings.INPUT_METHOD_SETTINGS contas:android.settings.SYNC_SETTINGS
+padrao:android.settings.MANAGE_DEFAULT_APPS_SETTINGS sobre:android.settings.DEVICE_INFO_SETTINGS configuracoes:android.settings.SETTINGS"
+
+abre() { # sem conexao tambem funciona: o Termux pode abrir telas sozinho
+  if conecta 2>/dev/null; then S=$(serial); sh_ "am start -a $1" >/dev/null 2>&1 && return 0; fi
+  am start -a "$1" >/dev/null 2>&1
+}
+
+liga_desliga() { # $1 = servico do svc, $2 = ligar|desligar, $3 = nome para o Rafael
+  case "$2" in
+    ligar) precisa; sh_ "svc $1 enable" && echo "$3 ligado." ;;
+    desligar) precisa; solto "svc $1 disable"; echo "$3 desligado." ;;
+    *) echo "Use: cel ${4:-$1} ligar|desligar"; exit 2 ;;
+  esac
+}
+
+case "${1:-status}" in
+  status)
+    if conecta 2>/dev/null; then
+      S=$(serial)
+      echo "Conexao com o sistema: OK ($S)"
+      echo "Wi-Fi: $(sh_ 'dumpsys wifi 2>/dev/null | grep -m1 "^Wi-Fi is"' | tr -d '\r')"
+      echo "Bluetooth: $(sh_ 'settings get global bluetooth_on' | tr -d '\r' | sed 's/1/ligado/;s/0/desligado/')"
+      echo "Dados moveis: $(sh_ 'settings get global mobile_data' | tr -d '\r' | sed 's/1/ligado/;s/0/desligado/')"
+      echo "Modo aviao: $(sh_ 'settings get global airplane_mode_on' | tr -d '\r' | sed 's/1/ligado/;s/0/desligado/')"
+      echo "Bateria: $(sh_ 'dumpsys battery | grep -m1 level' | tr -d ' \r')"
+      echo "Microfone do fone: $(sh_ "cat $DIR/mic-bt.modo 2>/dev/null" | tr -d '\r') | mudo do celular sem fone: $(sh_ "[ -f $DIR/mic-celular.bloqueado ] && echo sim || echo nao" | tr -d '\r')"
+    else
+      echo "Conexao com o sistema: NAO (ligue o Wi-Fi e a Depuracao sem fio; sem Wi-Fi, use o PC pela ponte)"
+    fi
+    ;;
+  conectar) if conecta; then echo "Conectado: $(serial)"; else echo "Nao conectei. Wi-Fi e Depuracao sem fio ligados?"; exit 2; fi ;;
+  parear)
+    tem_adb
+    [ $# -ge 3 ] || { echo "Use: cel parear PORTA CODIGO (aparecem em Depuracao sem fio > Parear com codigo)"; exit 2; }
+    case "$2$3" in *[!0-9]*) echo "Porta e codigo sao so numeros."; exit 2 ;; esac
+    timeout 20 adb pair "127.0.0.1:$2" "$3" && conecta && echo "Pareado e conectado: $(serial)"
+    ;;
+  wifi)
+    case "${2:-}" in
+      reiniciar) precisa; solto "svc wifi disable; sleep 4; svc wifi enable"; echo "Wi-Fi reiniciando (volta em ~10 s; a conexao com o sistema volta sozinha no proximo cel)." ;;
+      *) liga_desliga wifi "${2:-}" "Wi-Fi" wifi ;;
+    esac ;;
+  bluetooth)
+    case "${2:-}" in
+      ligar) precisa; sh_ "svc bluetooth enable 2>/dev/null || cmd bluetooth_manager enable" >/dev/null; echo "Bluetooth ligado." ;;
+      desligar) precisa; sh_ "svc bluetooth disable 2>/dev/null || cmd bluetooth_manager disable" >/dev/null; echo "Bluetooth desligado." ;;
+      *) echo "Use: cel bluetooth ligar|desligar"; exit 2 ;;
+    esac ;;
+  dados) liga_desliga data "${2:-}" "Dados moveis" dados ;;
+  tela) # escurecer SEM bloquear, igual ao tela-apagada.py do PC (camada preta + brilho 0; usa os arquivos que ja estao no celular)
+    VG=/data/local/tmp/tela-vigia.sh
+    ESC="ps -A -o PID,ARGS | grep '[T]ela escuro' | awk '{print \$1}'"
+    case "${2:-status}" in
+      apagar)
+        precisa
+        sh_ "dumpsys window 2>/dev/null | grep -m1 -o 'isKeyguardShowing=true'" | grep -q true && { echo "O celular esta pedindo o PIN: desbloqueie e peca de novo."; exit 2; }
+        [ -n "$(sh_ "$ESC" | tr -d '\r')" ] && { echo "Ja esta escura."; exit 0; }
+        args=$(sh_ "ps -A -o ARGS | grep '[t]ela-vigia.sh vigiar' | head -1" | tr -d '\r')
+        nos=${args#*vigiar }
+        case "$args" in *vigiar\ /dev/input/*) ;; *) echo "A vigia do gesto nao esta de pe (ela sabe quais botoes acendem a tela). Use volume para baixo 3 vezes, ou ligue o cabo ao PC (TelaGesto religa)."; exit 2 ;; esac
+        case "$nos" in *[!a-z0-9/\ ]*) echo "Botoes com nome estranho; nao escureco."; exit 2 ;; esac
+        solto "sh $VG agora $nos"
+        for _ in 1 2 3 4 5 6 7 8; do
+          sleep 1
+          c=$(sh_ "dumpsys SurfaceFlinger 2>/dev/null | grep -c tela-preta" | tr -d '\r')
+          [ "${c:-0}" != 0 ] && { echo "Tela escura, sem bloqueio; a depuracao segue ativa. Acende com dois toques, volume para cima, alarme ou chamada."; exit 0; }
+        done
+        echo "Nao escureceu: $(sh_ 'cat /data/local/tmp/tela-vigia.motivo 2>/dev/null' | tr -d '\r')"; exit 1 ;;
+      acender)
+        precisa
+        sh_ "for p in \$($ESC); do kill \$p; done; sleep 1; CLASSPATH=/data/local/tmp/tela.dex app_process / Tela luz volta; rmdir /data/local/tmp/tela-escuro.trava 2>/dev/null" >/dev/null
+        echo "Tela acesa." ;;
+      status)
+        precisa
+        e=$(sh_ "$ESC" | tr -d '\r'); v=$(sh_ "ps -A -o ARGS | grep -c '[t]ela-vigia.sh vigiar'" | tr -d '\r')
+        echo "Tela: $([ -n "$e" ] && echo escura || echo normal) | gesto (volume para baixo 3x): $([ "${v:-0}" != 0 ] && echo ativo || echo parado)" ;;
+      *) echo "Use: cel tela apagar|acender|status"; exit 2 ;;
+    esac ;;
+  economia-dados) # Economia de dados do Android: corta dado em segundo plano na rede cobrada (4G); NAO comprime (ver QWEN.md)
+    case "${2:-status}" in
+      ligar) precisa; sh_ "cmd netpolicy set restrict-background true" >/dev/null; echo "Economia de dados ligada: apps em segundo plano sem dados moveis (o app aberto usa normal)." ;;
+      desligar) precisa; sh_ "cmd netpolicy set restrict-background false" >/dev/null; echo "Economia de dados desligada." ;;
+      status) precisa; echo "Economia de dados: $(sh_ 'cmd netpolicy get restrict-background' | tr -d '\r')" ;;
+      *) echo "Use: cel economia-dados ligar|desligar|status"; exit 2 ;;
+    esac ;;
+  aviao)
+    case "${2:-}" in
+      ligar) precisa; solto "cmd connectivity airplane-mode enable"; echo "Modo aviao ligado (a conexao com o sistema cai junto)." ;;
+      desligar) precisa; sh_ "cmd connectivity airplane-mode disable"; echo "Modo aviao desligado." ;;
+      *) echo "Use: cel aviao ligar|desligar"; exit 2 ;;
+    esac ;;
+  internet)
+    [ "${2:-}" = reiniciar ] || { echo "Use: cel internet reiniciar"; exit 2; }
+    precisa; solto "cmd connectivity airplane-mode enable; sleep 4; cmd connectivity airplane-mode disable"
+    echo "Internet reiniciando: modo aviao por 4 s. Volta em ~15 s." ;;
+  limpar)
+    precisa; antes=$(sh_ "df /data | tail -1" | awk '{print $4}')
+    sh_ "pm trim-caches 100G" >/dev/null
+    depois=$(sh_ "df /data | tail -1" | awk '{print $4}')
+    echo "Caches limpos (os dados dos apps ficam). Livre antes: ${antes:-?} KB, depois: ${depois:-?} KB." ;;
+  otimizar)
+    precisa; sh_ "pm trim-caches 100G; am kill-all; sync" >/dev/null
+    echo "Caches limpos e apps parados em segundo plano fechados (os abertos e os protegidos ficam)." ;;
+  telas) echo "Telas que o cel abre:"; for t in $TELAS; do printf '  %s\n' "${t%%:*}"; done ;;
+  abrir)
+    alvo="${2:-}"
+    for t in $TELAS; do
+      if [ "${t%%:*}" = "$alvo" ]; then abre "${t#*:}" && echo "Abri: $alvo"; exit 0; fi
+    done
+    echo "Nao conheco a tela '$alvo'. Opcoes: cel telas"; exit 2 ;;
+  abrir-app)
+    pkg="${2:-}"; case "$pkg" in ''|*[!A-Za-z0-9._]*) echo "Use: cel abrir-app PACOTE (veja cel apps)"; exit 2 ;; esac
+    precisa; sh_ "monkey -p $pkg -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1 && echo "Abri $pkg." ;;
+  apps) precisa; sh_ "pm list packages" | sed 's/^package://' | tr -d '\r' | grep -i -- "${2:-.}" | sort ;;
+  procurar)
+    txt="${2:-}"; [ -n "$txt" ] || { echo "Use: cel procurar TEXTO"; exit 2; }
+    echo "== arquivos"; find /sdcard -iname "*$txt*" 2>/dev/null | head -n 30
+    if conecta 2>/dev/null; then S=$(serial)
+      echo "== apps"; sh_ "pm list packages" | sed 's/^package://' | tr -d '\r' | grep -i -- "$txt" | head -n 20
+      echo "== configuracoes"; for ns in global secure system; do sh_ "settings list $ns" | tr -d '\r' | grep -i -- "$txt" | sed "s/^/$ns: /" | head -n 10; done
+    fi
+    echo "== telas"; for t in $TELAS; do case "${t%%:*}" in *"$txt"*) echo "cel abrir ${t%%:*}" ;; esac; done ;;
+  tv)
+    abre android.settings.CAST_SETTINGS
+    echo "Abri a transmissao de tela do Android (a TV e o celular na mesma rede Wi-Fi; a TV precisa aceitar Miracast ou Chromecast)."
+    if conecta 2>/dev/null; then S=$(serial)
+      echo "Apps de espelhamento instalados:"; sh_ "pm list packages" | tr -d '\r' | grep -iE 'smartmirroring|miracast|screenstream|cast|smartview' | sed 's/^package:/  /'
+    fi ;;
+  microfone)
+    precisa
+    case "${2:-status}" in
+      sempre) sh_ "echo fixo > $DIR/mic-bt.modo"; echo "Microfone do fone sempre ativo (som do fone em qualidade de ligacao)." ;;
+      gravar) sh_ "echo auto > $DIR/mic-bt.modo"; echo "Microfone do fone so ao gravar; musica em AAC." ;;
+      desligado) sh_ "echo desligado > $DIR/mic-bt.modo"; echo "Microfone do fone nunca abre." ;;
+      mudo) sh_ "touch $DIR/mic-celular.bloqueado"; echo "Microfone do celular mudo quando nao houver fone." ;;
+      ligado) sh_ "rm -f $DIR/mic-celular.bloqueado; CLASSPATH=$DEX app_process / Tela mic-solta" | tr -d '\r' ;;
+      status) sh_ "echo fone: \$(cat $DIR/mic-bt.modo 2>/dev/null); [ -f $DIR/mic-celular.bloqueado ] && echo celular: mudo sem fone || echo celular: ligado" | tr -d '\r' ;;
+      *) echo "Use: cel microfone sempre|gravar|desligado|mudo|ligado|status"; exit 2 ;;
+    esac
+    sh_ "pgrep -f 'Tela wifi-turbo' >/dev/null" || echo "AVISO: o processo que aplica isso esta parado; ele volta quando o celular for ao cabo do PC."
+    ;;
+  depuracao)
+    [ "${2:-}" = manter ] || { echo "Use: cel depuracao manter"; exit 2; }
+    precisa; sh_ "settings put global adb_enabled 1; settings put global adb_wifi_enabled 1"; echo "Depuracao USB e sem fio mantidas ligadas." ;;
+  ler|ver) # o que esta na tela agora: lista numerada de textos e botoes com o centro de cada um (para `cel tocar N`)
+    precisa; le_tela "${2:-}" ;;
+  tocar)
+    alvo="${2:-}"; [ -n "$alvo" ] || { echo "Use: cel tocar N (da lista do cel ler) | cel tocar \"texto do botao\" | cel tocar X Y"; exit 2; }
+    precisa
+    if [ -n "${3:-}" ]; then quem=$(acha_elemento xy "$2 $3"); else
+      case "$alvo" in *[!0-9]*) le_tela >/dev/null; quem=$(acha_elemento texto "$alvo") ;; *) quem=$(acha_elemento numero "$alvo") ;; esac
+    fi
+    case "$quem" in
+      PERIGO:*) echo "Recusado: \"${quem#PERIGO:}\" e um botao que nao tem volta (apagar, desinstalar, pagar, permitir depuracao...). So o Rafael toca, com a mao dele."; exit 3 ;;
+      OK:*) set -- ${quem#OK:}; sh_ "input tap $1 $2"; echo "Toquei em \"${quem#OK:* * }\" ($1,$2)." ;;
+      *) echo "Nao achei \"$alvo\" na tela. Veja a lista: cel ler"; exit 2 ;;
+    esac ;;
+  digitar)
+    shift; [ $# -gt 0 ] || { echo "Use: cel digitar \"texto\" (o campo precisa estar selecionado: cel tocar nele antes)"; exit 2; }
+    precisa
+    t=$(printf '%s' "$*" | python3 -c 'import sys,unicodedata as u; s=sys.stdin.read(); a=u.normalize("NFKD",s).encode("ascii","ignore").decode(); print(("1" if a!=s else "0")+a.replace(" ","%s"))')
+    case "$t" in 1*) echo "Aviso: o teclado do sistema por comando nao digita acento; foi sem acento." ;; esac
+    t=${t#?}; t=$(printf '%s' "$t" | sed "s/'/'\\\\''/g")
+    sh_ "input text '$t'"; echo "Digitado." ;;
+  rolar)
+    precisa; tam=$(sh_ "wm size | tail -1" | tr -d '\r' | grep -o '[0-9]*x[0-9]*'); w=${tam%x*}; h=${tam#*x}
+    o=$(sh_ "dumpsys input | grep -m1 -o 'SurfaceOrientation: [0-9]'" | tr -d '\r' | grep -o '[0-9]$')
+    case "$o" in 1|3) x=$w; w=$h; h=$x ;; esac
+    cx=$((w/2)); cy=$((h/2))
+    case "${2:-baixo}" in
+      baixo) sh_ "input swipe $cx $((h*3/4)) $cx $((h/4)) 300" ;;
+      cima) sh_ "input swipe $cx $((h/4)) $cx $((h*3/4)) 300" ;;
+      direita) sh_ "input swipe $((w*4/5)) $cy $((w/5)) $cy 250" ;;
+      esquerda) sh_ "input swipe $((w/5)) $cy $((w*4/5)) $cy 250" ;;
+      *) echo "Use: cel rolar baixo|cima|direita|esquerda"; exit 2 ;;
+    esac; echo "Rolei para ${2:-baixo}." ;;
+  tecla)
+    case "${2:-}" in
+      voltar) k=4 ;; inicio) k=3 ;; recentes) k=187 ;; enter) k=66 ;; apagar) k=67 ;; tab) k=61 ;;
+      volume-mais) k=24 ;; volume-menos) k=25 ;; *) echo "Use: cel tecla voltar|inicio|recentes|enter|apagar|tab|volume-mais|volume-menos (liga/desliga a tela: cel tela)"; exit 2 ;;
+    esac
+    precisa; sh_ "input keyevent $k"; echo "Tecla ${2} enviada." ;;
+  sh) shift; [ $# -gt 0 ] || { echo "Use: cel sh \"comando\""; exit 2; }; precisa; sh_ "$*" ;;
+  *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

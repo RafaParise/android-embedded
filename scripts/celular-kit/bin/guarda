@@ -1,0 +1,448 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# guarda - vigia de arquivos do celular. O motor e o MESMO do PC (ClamAV): aqui so se percebe o arquivo novo e ele vai pela ponte, cifrado pela Tailscale, a varredura no PC.
+#   guarda ligar | desligar | status | varrer ARQ | varredura | quarentena | devolver ID | provar | registro | menu
+#   antivirus   (mesmo programa: abre o menu em texto, verde, escolha com as setas, Enter ou o numero)
+# Parado nao gasta: o inotifywait dorme ate o Android avisar. O motor nao roda aqui porque pede cerca de 1 GB de memoria.
+# Limites reais: sem o PC ao alcance o arquivo espera (nada e dado como limpo); so le Download e Documents; nao ve pasta privada de app (WhatsApp, Telegram);
+# app novo e conferido pelo pacote base; atualizacao de app nao, para nao gastar dados moveis. Nunca apaga: o que acusa vai para a quarentena.
+# Variaveis: GUARDA_PASTAS, GUARDA_LIMITE_MB (padrao 64), GUARDA_CICLO (segundos, padrao 1800), IA_PC_IP, PONTE_URL, IA_CONECTA.
+set -u
+URL="${PONTE_URL:-http://${IA_PC_IP:-100.64.0.1}:20130}"
+BASE="${GUARDA_BASE:-$HOME/.cache/guarda}"
+QUAR="$BASE/quarentena"
+LIGADO="$BASE/ligado"
+PID="$BASE/laco.pid"
+REG="$BASE/registro"
+VISTOS="$BASE/vistos"
+MARCA="$BASE/marca"
+PEND="$BASE/pendentes"
+INOTIFY="$BASE/inotify.pid"
+APPS="$BASE/apps"
+PASTAS="${GUARDA_PASTAS:-/sdcard/Download /sdcard/Documents $HOME/kit/caixa-de-entrada}"  # o que chega de fora, inclusive o que o PC manda
+LIMITE_MB="${GUARDA_LIMITE_MB:-64}"
+CICLO="${GUARDA_CICLO:-1800}"
+CONECTA="${IA_CONECTA:-10}"
+TEXTO_TESTE='GUARDA-TESTE-INOFENSIVO-CONFERE-O-CAMINHO-INTEIRO'
+SELF="$(command -v "$0" 2>/dev/null || echo "$0")"
+
+mkdir -p "$BASE" "$QUAR"
+reg() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$REG"; if [ "$(wc -l < "$REG")" -gt 2000 ]; then tail -n 1000 "$REG" > "$REG.novo" && mv "$REG.novo" "$REG"; fi; }
+token() { grep '^PONTE_PC_TOKEN=' "$HOME/.qwen/.env" 2>/dev/null | head -1 | cut -d= -f2-; }
+
+avisa() { # notificacao no proprio celular (app Termux:API). Sem o app o comando ficaria parado: por isso o limite de tempo. Falha de aviso nunca atrapalha a vigia
+  case "$2" in Guarda.Teste*) return 0 ;; esac  # a prova nao incomoda
+  command -v termux-notification >/dev/null 2>&1 || return 0
+  timeout 20 termux-notification --id guarda --priority high --title "Guarda: $1" --content "$2" </dev/null >/dev/null 2>&1 || reg "aviso nao saiu (app Termux:API?)"
+  return 0
+}
+
+ignora() { # ainda sendo gravado ou arquivo interno do Android
+  case "${1##*/}" in
+    .pending-*|.trashed-*|.nomedia|*.crdownload|*.part|*.partial|*.tmp|*.download) return 0 ;;
+    MAPAO_*.xlsx|mapao_*.xlsx|Mapao_*.xlsx) return 0 ;;  # regra do Rafael: planilha de notas nunca e aberta nem enviada
+  esac
+  return 1
+}
+
+assinatura() { printf '%s|%s\n' "$1" "$(stat -c '%s|%Y' "$1" 2>/dev/null)" | md5sum | cut -d' ' -f1; }
+ja_visto() { [ -f "$VISTOS" ] && grep -qxF "$1" "$VISTOS"; }
+marca_visto() {
+  echo "$1" >> "$VISTOS"
+  if [ "$(wc -l < "$VISTOS")" -gt 4000 ]; then tail -n 2000 "$VISTOS" > "$VISTOS.novo" && mv "$VISTOS.novo" "$VISTOS"; fi
+}
+
+envia() { # imprime limpo, "infectado NOME" ou nada (nada = nao deu: quem chama NAO pode tratar como limpo)
+  local t r
+  t=$(token)
+  [ -n "$t" ] || { reg "sem token da ponte"; return 1; }
+  r=$(printf 'header = "Authorization: Bearer %s"\n' "$t" | curl -sS -K - --connect-timeout "$CONECTA" --max-time 600 -X POST -H 'Expect:' -H 'Content-Type: application/octet-stream' \
+      -w '\n%{http_code}' --data-binary @"$1" "$URL/v1/varrer" 2>/dev/null) || return 1
+  [ "$(printf '%s' "$r" | tail -n 1)" = "200" ] || return 1
+  r=$(printf '%s' "$r" | sed '$d')
+  case "$r" in
+    *'"estado": "limpo"'*|*'"estado":"limpo"'*) echo limpo ;;
+    *'"estado": "infectado"'*|*'"estado":"infectado"'*)
+      echo "infectado $(printf '%s' "$r" | sed -n 's/.*"ameaca": *"\([^"]*\)".*/\1/p' | tr -cd 'A-Za-z0-9._-')" ;;
+    *) return 1 ;;
+  esac
+}
+
+isola() { # move para fora do armazenamento compartilhado e guarda a origem para `devolver`
+  local arq="$1" ameaca="$2" id nome
+  id="$(date '+%Y%m%d-%H%M%S')-$$-$RANDOM"
+  nome="$id.quarentena"
+  printf '%s\n%s\n' "$arq" "$ameaca" > "$QUAR/$nome.info"
+  if mv -- "$arq" "$QUAR/$nome"; then
+    reg "isolado $id: $ameaca"
+    avisa "arquivo isolado" "$ameaca"
+    echo "$id"
+    return 0
+  fi
+  unlink "$QUAR/$nome.info" 2>/dev/null
+  reg "nao consegui isolar ($ameaca)"
+  return 1
+}
+
+varre_um() { # 0 = resolvido; 1 = nao deu para varrer agora (fica para a proxima volta)
+  local arq="$1" tam sig r
+  [ -f "$arq" ] && [ ! -L "$arq" ] || return 0
+  ignora "$arq" && return 0
+  sig=$(assinatura "$arq")
+  ja_visto "$sig" && return 0
+  tam=$(stat -c %s "$arq" 2>/dev/null || echo 0)
+  [ "$tam" -gt 0 ] || return 0
+  if [ "$tam" -gt $((LIMITE_MB * 1024 * 1024)) ]; then
+    reg "grande demais, NAO varrido ($((tam / 1048576)) MB): use antivirus-pc.ps1 -Celular pelo cabo"
+    marca_visto "$sig"
+    return 0
+  fi
+  r=$(envia "$arq") || { reg "PC fora de alcance: arquivo esperando"; return 1; }
+  case "$r" in
+    limpo) reg "limpo"; marca_visto "$sig" ;;
+    infectado*) isola "$arq" "${r#infectado }" >/dev/null || return 1 ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+varre_pendentes() { # o que o Android avisou: vai pelo nome, mesmo com data antiga (Bluetooth e KDE Connect podem preservar a data)
+  [ -s "$PEND" ] || return 0
+  local resto="$PEND.resto" arq falhou=0
+  : > "$resto"
+  while IFS= read -r arq; do
+    varre_um "$arq" || { printf '%s\n' "$arq" >> "$resto"; falhou=1; }
+  done < "$PEND"
+  mv -f "$resto" "$PEND"
+  return "$falhou"
+}
+
+varre_recentes() { # tudo que mudou desde a ultima volta completa; a marca so avanca se nada ficou para tras
+  local inicio falhou=0 arq desde=()
+  inicio="$BASE/marca.nova"
+  : > "$inicio"
+  [ -f "$MARCA" ] && desde=(\( -newer "$MARCA" -o -cnewer "$MARCA" \))  # -cnewer: arquivo movido para ca guarda a data antiga
+  for pasta in $PASTAS; do
+    [ -d "$pasta" ] || continue
+    while IFS= read -r -d '' arq; do
+      varre_um "$arq" || { falhou=1; break 2; }
+    done < <(find "$pasta" -type f "${desde[@]}" -print0 2>/dev/null)
+  done
+  if [ "$falhou" = 0 ]; then mv -f "$inicio" "$MARCA"; else unlink "$inicio" 2>/dev/null; fi
+  return "$falhou"
+}
+
+confere_apps() { # app novo (nome ainda nao visto). Na primeira vez so grava a referencia: os 64 foram varridos pelo cabo em 03-04/11
+  local agora novos linha pkg apk r
+  agora=$(pm list packages -f -3 2>/dev/null) || return 0
+  [ -n "$agora" ] || return 0
+  if [ ! -f "$APPS" ]; then
+    printf '%s\n' "$agora" | sed 's/.*=//' | sort > "$APPS"
+    return 0
+  fi
+  while IFS= read -r linha; do
+    pkg="${linha##*=}"
+    grep -qxF "$pkg" "$APPS" && continue
+    apk="${linha#package:}"
+    apk="${apk%=*}"
+    if [ -r "$apk" ] && [ "$(stat -c %s "$apk" 2>/dev/null || echo 0)" -le $((LIMITE_MB * 1024 * 1024)) ]; then
+      r=$(envia "$apk") || { reg "app novo esperando o PC"; continue; }
+      case "$r" in
+        infectado*) reg "APP SUSPEITO $pkg: ${r#infectado } (o Android nao deixa isolar: desinstale)"; avisa "app suspeito: desinstale" "$pkg" ;;
+        *) reg "app novo limpo" ;;
+      esac
+    else
+      reg "app novo grande demais, NAO varrido: use antivirus-pc.ps1 -Celular pelo cabo"
+    fi
+    echo "$pkg" >> "$APPS"
+  done <<< "$agora"
+}
+
+laco() {
+  local ev espera
+  while [ -f "$LIGADO" ]; do
+    espera="$CICLO"
+    varre_pendentes || espera=300
+    varre_recentes || espera=300
+    confere_apps
+    if IFS= read -r -t "$espera" ev <&3; then
+      printf '%s\n' "$ev" >> "$PEND"
+      sleep 2  # deixa acabar de gravar
+      while IFS= read -r -t 1 ev <&3; do printf '%s\n' "$ev" >> "$PEND"; done  # junta a rajada
+    fi
+  done
+}
+
+roda_laco() {
+  local pastas=()
+  for p in $PASTAS; do [ -d "$p" ] && pastas+=("$p"); done
+  [ "${#pastas[@]}" -gt 0 ] || exit 1
+  para_inotify  # sobra de um laco que o Android tenha matado
+  exec 3< <(exec inotifywait -q -m -r -e close_write -e moved_to --format '%w%f' "${pastas[@]}" 2>/dev/null)
+  echo "$!" > "$INOTIFY"
+  laco
+}
+
+para_inotify() { [ -f "$INOTIFY" ] && { kill "$(cat "$INOTIFY")" 2>/dev/null; unlink "$INOTIFY"; }; return 0; }
+vivo() { [ -f "$PID" ] && kill -0 "$(cat "$PID" 2>/dev/null)" 2>/dev/null; }
+
+# ---------- menu (comando `antivirus` ou `guarda menu`): so texto, verde puro, setas ou numero. Nada fica rodando depois de sair ----------
+V=$'\e[38;2;0;255;0m'; SEL=$'\e[48;2;0;255;0m\e[38;2;0;0;0m'; FR=$'\e[2m'; NG=$'\e[1m'; Z=$'\e[0m'
+TOPO=""
+
+tecla() { # cima, baixo, ok, sair, nada ou um digito
+  local c r=""
+  IFS= read -rsn1 c || { echo sair; return; }
+  case "$c" in
+    $'\e') IFS= read -rsn2 -t 0.1 r || true
+           case "$r" in '[A'|'OA') echo cima ;; '[B'|'OB') echo baixo ;; '') echo sair ;; *) echo nada ;; esac ;;
+    '') echo ok ;;
+    k|K|w|W) echo cima ;;
+    j|J|s|S) echo baixo ;;
+    q|Q) echo sair ;;
+    [0-9]) echo "$c" ;;
+    *) echo nada ;;
+  esac
+}
+
+cabecalho() {
+  printf '\e[H\e[2J'
+  printf '%s\n' "$V$NG  GUARDA$Z$V  antivírus do celular$Z"
+  [ -n "$TOPO" ] && printf '%s\n' "$V$FR  $TOPO$Z"
+  printf '\n'
+}
+
+escolhe() { # escolhe "pergunta" item1 item2 ... -> ESCOLHA = 0..n-1, ou -1 para sair
+  local pergunta="$1" n i=0 k t a
+  shift
+  n=$#
+  ESCOLHA=-1
+  while :; do
+    cabecalho
+    printf '%s\n\n' "$V  $pergunta$Z"
+    k=0
+    for t in "$@"; do
+      k=$((k + 1))
+      if [ "$k" = "$((i + 1))" ]; then printf '%s\n' "  $SEL ❯ $k. $t $Z"; else printf '%s\n' "$V    $k. $t$Z"; fi
+    done
+    printf '\n%s\n' "$V$FR  ↑↓ escolher · Enter confirmar · número vai direto · q sai$Z"
+    a=$(tecla)
+    case "$a" in
+      cima) i=$(( (i - 1 + n) % n )) ;;
+      baixo) i=$(( (i + 1) % n )) ;;
+      ok) ESCOLHA=$i; return 0 ;;
+      sair) return 0 ;;
+      [1-9]) [ "$a" -le "$n" ] && { ESCOLHA=$((a - 1)); return 0; } ;;
+    esac
+  done
+}
+
+pausa() { printf '\n%s' "$V$FR  Enter para voltar ao menu$Z"; IFS= read -rs _ || true; }
+
+roda() { # mostra a saida de um comando do proprio guarda em verde; o comando nunca le o teclado do menu
+  cabecalho
+  printf '%s\n\n' "$V  $1$Z"
+  shift
+  bash "$SELF" "$@" </dev/null 2>&1 | while IFS= read -r l; do printf '%s\n' "$V  $l$Z"; done
+}
+
+situacao() {
+  local s p
+  if vivo; then s="● tempo real ligado"; else s="○ tempo real DESLIGADO"; fi
+  if curl -s --connect-timeout 3 --max-time 5 "$URL/saude" </dev/null >/dev/null 2>&1; then p="PC ao alcance"; else p="PC fora: arquivos esperam"; fi
+  TOPO="$s · $p · quarentena $(find "$QUAR" -name '*.quarentena' 2>/dev/null | wc -l)"
+}
+
+menu_varrer_arquivo() {
+  local arqs=() nomes=() a c
+  mapfile -t arqs < <(for p in $PASTAS; do [ -d "$p" ] && find "$p" -maxdepth 2 -type f -printf '%T@ %p\n' 2>/dev/null; done | sort -rn | head -n 7 | cut -d' ' -f2-)
+  for a in "${arqs[@]}"; do nomes+=("${a##*/}"); done
+  escolhe "Qual arquivo? (os mais novos primeiro)" "${nomes[@]}" "Digitar o caminho" "Voltar"
+  c=$ESCOLHA
+  [ "$c" -lt 0 ] && return
+  if [ "$c" -lt "${#arqs[@]}" ]; then a="${arqs[$c]}"
+  elif [ "$c" = "${#arqs[@]}" ]; then
+    [ -t 1 ] && printf '\e[?25h'
+    printf '\n%s' "$V  Caminho do arquivo: $Z"
+    IFS= read -r a || return
+    [ -t 1 ] && printf '\e[?25l'
+  else return
+  fi
+  roda "Varrer ${a##*/}" varrer "$a"
+  pausa
+}
+
+menu_varredura() {
+  local narq napps
+  narq=$(for p in $PASTAS; do [ -d "$p" ] && find "$p" -type f 2>/dev/null; done | wc -l)
+  napps=$(pm list packages -3 2>/dev/null </dev/null | wc -l)
+  escolhe "Varredura completa: $narq arquivo(s) e $napps app(s) vão ao PC pela VPN. Com dados móveis, gasta franquia." \
+    "Sim, iniciar agora" "Não, voltar"
+  [ "$ESCOLHA" = 0 ] || return
+  roda "Varredura completa (pode levar minutos; não feche o Termux)" varredura
+  pausa
+}
+
+menu_devolver() {
+  local ids=() nomes=() f id
+  for f in "$QUAR"/*.quarentena; do
+    [ -f "$f" ] || continue
+    id="${f##*/}"; id="${id%.quarentena}"
+    ids+=("$id")
+    nomes+=("$(sed -n 1p "$f.info" | sed 's#.*/##') ($(sed -n 2p "$f.info"))")
+  done
+  if [ "${#ids[@]}" = 0 ]; then roda "Quarentena" quarentena; pausa; return; fi
+  escolhe "Qual arquivo devolver ao lugar de origem?" "${nomes[@]}" "Voltar"
+  [ "$ESCOLHA" -ge 0 ] && [ "$ESCOLHA" -lt "${#ids[@]}" ] || return
+  id="${ids[$ESCOLHA]}"
+  escolhe "Devolver ${nomes[$ESCOLHA]}? O guarda não vai mais acusar este mesmo conteúdo." "Não, deixar isolado" "Sim, devolver"
+  [ "$ESCOLHA" = 1 ] || return
+  roda "Devolver" devolver "$id"
+  pausa
+}
+
+menu() {
+  local fim=0 lig
+  if [ -t 1 ]; then printf '\e[?25l'; trap 'printf "\e[?25h\e[0m\e[H\e[2J"' EXIT; fi
+  while [ "$fim" = 0 ]; do
+    situacao
+    if vivo; then lig="Desligar a proteção em tempo real"; else lig="Ligar a proteção em tempo real"; fi
+    escolhe "O que fazer?" \
+      "Ver a situação da proteção" \
+      "Iniciar varredura completa no dispositivo" \
+      "Varrer um arquivo" \
+      "Ver a quarentena" \
+      "Devolver um arquivo da quarentena" \
+      "$lig" \
+      "Testar a proteção (arquivo inofensivo)" \
+      "Ver o registro" \
+      "Sair"
+    case "$ESCOLHA" in
+      0) roda "Situação" status; pausa ;;
+      1) menu_varredura ;;
+      2) menu_varrer_arquivo ;;
+      3) roda "Quarentena" quarentena; pausa ;;
+      4) menu_devolver ;;
+      5) if vivo; then
+           escolhe "Desligar? Arquivos novos ficam sem varredura até ligar de novo." "Não, manter ligada" "Sim, desligar"
+           [ "$ESCOLHA" = 1 ] && { roda "Desligar" desligar; pausa; }
+         else roda "Ligar" ligar; pausa; fi ;;
+      6) roda "Teste com arquivo inofensivo (até 4 min)" provar; pausa ;;
+      7) roda "Registro" registro 20; pausa ;;
+      *) fim=1 ;;
+    esac
+  done
+}
+
+[ "${0##*/}" = antivirus ] && [ $# = 0 ] && set -- menu
+
+case "${1:-status}" in
+  menu) menu ;;
+  laco)
+    echo $$ > "$PID"
+    roda_laco
+    ;;
+  ligar)
+    command -v inotifywait >/dev/null 2>&1 || { echo "Falta o inotify-tools: pkg install inotify-tools"; exit 1; }
+    : > "$LIGADO"
+    if vivo; then echo "Guarda ja estava ligado."; exit 0; fi
+    [ -f "$MARCA" ] || : > "$MARCA"  # primeira vez: daqui para frente. O que ja estava aqui so vai com `guarda varredura`, para nao gastar dados moveis sem aviso
+    nohup bash "$SELF" laco </dev/null >/dev/null 2>&1 &
+    sleep 1
+    if vivo; then echo "Guarda ligado."; else echo "O guarda NAO subiu."; exit 1; fi
+    ;;
+  desligar)
+    [ -f "$LIGADO" ] && unlink "$LIGADO"
+    if vivo; then pkill -P "$(cat "$PID")" 2>/dev/null; kill "$(cat "$PID")" 2>/dev/null; fi
+    para_inotify
+    [ -f "$PID" ] && unlink "$PID"
+    echo "Guarda desligado."
+    ;;
+  status)
+    if vivo; then echo "Guarda: ligado"; else echo "Guarda: DESLIGADO"; fi
+    echo "Pastas: $PASTAS"
+    if [ -f "$HOME/.qwen/.env" ] && curl -s --connect-timeout "$CONECTA" --max-time 15 "$URL/saude" </dev/null >/dev/null 2>&1; then echo "PC: ao alcance"; else echo "PC: FORA de alcance (arquivos novos esperam)"; fi
+    echo "Quarentena: $(find "$QUAR" -name '*.quarentena' 2>/dev/null | wc -l) arquivo(s)"
+    [ -f "$REG" ] && { echo "Ultimos registros:"; tail -n 5 "$REG" | cut -c1-120; }
+    ;;
+  varrer)
+    [ -f "${2:-}" ] || { echo "Uso: guarda varrer ARQUIVO"; exit 2; }
+    r=$(envia "$2") || { echo "Nao deu para varrer: PC fora de alcance ou com pouca memoria. Nada foi dado como limpo."; exit 2; }
+    case "$r" in
+      limpo) echo "Limpo." ;;
+      infectado*) id=$(isola "$2" "${r#infectado }") && echo "Isolado: ${r#infectado } (guarda devolver $id)"; exit 1 ;;
+    esac
+    ;;
+  varredura)  # tudo das pastas e todos os apps, de novo. Arquivo grande nao vai: pelo cabo, antivirus-pc.ps1 -Celular
+    bons=0; ruins=0; grandes=0
+    for pasta in $PASTAS; do
+      [ -d "$pasta" ] || continue
+      while IFS= read -r -d '' arq; do
+        ignora "$arq" && continue
+        tam=$(stat -c %s "$arq" 2>/dev/null || echo 0)
+        [ "$tam" -gt 0 ] || continue
+        [ "$tam" -le $((LIMITE_MB * 1024 * 1024)) ] || { grandes=$((grandes + 1)); continue; }
+        r=$(envia "$arq") || { echo "Parou: o PC saiu do alcance. Nada do que faltava foi dado como limpo."; exit 2; }
+        case "$r" in
+          limpo) bons=$((bons + 1)) ;;
+          infectado*) ruins=$((ruins + 1)); isola "$arq" "${r#infectado }" >/dev/null ;;
+        esac
+      done < <(find "$pasta" -type f -print0 2>/dev/null)
+    done
+    while IFS= read -r linha; do
+      apk="${linha#package:}"; apk="${apk%=*}"
+      [ -r "$apk" ] || continue
+      [ "$(stat -c %s "$apk" 2>/dev/null || echo 0)" -le $((LIMITE_MB * 1024 * 1024)) ] || { grandes=$((grandes + 1)); continue; }
+      r=$(envia "$apk") || { echo "Parou: o PC saiu do alcance. Nada do que faltava foi dado como limpo."; exit 2; }
+      case "$r" in
+        limpo) bons=$((bons + 1)) ;;
+        infectado*) ruins=$((ruins + 1)); reg "APP SUSPEITO ${linha##*=}: ${r#infectado } (o Android nao deixa isolar: desinstale)"; avisa "app suspeito: desinstale" "${linha##*=}"; echo "APP SUSPEITO: ${linha##*=}" ;;
+      esac
+    done < <(pm list packages -f -3 2>/dev/null)
+    echo "Varredura: $bons limpos, $ruins suspeitos, $grandes grandes demais (pelo cabo: antivirus-pc.ps1 -Celular)."
+    reg "varredura: $bons limpos, $ruins suspeitos, $grandes grandes"
+    [ "$ruins" = 0 ]
+    ;;
+  quarentena)
+    achou=0
+    for f in "$QUAR"/*.quarentena; do
+      [ -f "$f" ] || continue
+      achou=1
+      id="${f##*/}"; id="${id%.quarentena}"
+      echo "$id | $(sed -n 2p "$f.info") | $(sed -n 1p "$f.info")"
+    done
+    [ "$achou" = 1 ] || echo "Quarentena vazia."
+    ;;
+  devolver)
+    id="${2:-}"
+    case "$id" in ''|*[!0-9-]*) echo "Uso: guarda devolver ID (veja em guarda quarentena)"; exit 2 ;; esac
+    f="$QUAR/$id.quarentena"
+    [ -f "$f" ] || { echo "Nao ha esse id na quarentena."; exit 1; }
+    origem=$(sed -n 1p "$f.info")
+    [ -e "$origem" ] && { echo "Ja existe um arquivo com esse nome na origem; nada foi mudado."; exit 1; }
+    mv -- "$f" "$origem" || { echo "Nao consegui devolver; nada foi mudado."; exit 1; }
+    unlink "$f.info"
+    marca_visto "$(assinatura "$origem")"
+    reg "devolvido $id"
+    echo "Devolvido a $origem"
+    ;;
+  provar)
+    vivo || { echo "O guarda esta desligado."; exit 2; }
+    alvo="/sdcard/Download/guarda-prova-$$.txt"
+    printf '%s\n' "$TEXTO_TESTE" > "$alvo"
+    inicio=$(date +%s)
+    while [ $(( $(date +%s) - inicio )) -lt 240 ]; do
+      if [ ! -e "$alvo" ] && grep -qsxF "$alvo" "$QUAR"/*.info; then
+        info=$(grep -lxF "$alvo" "$QUAR"/*.info | head -1)
+        echo "PROVADO: isolado em $(( $(date +%s) - inicio )) s como $(sed -n 2p "$info")."
+        unlink "${info%.info}"; unlink "$info"
+        exit 0
+      fi
+      sleep 1
+    done
+    echo "FALHOU: o arquivo de prova nao foi isolado (PC fora de alcance?)."
+    [ -e "$alvo" ] && unlink "$alvo"
+    exit 1
+    ;;
+  registro) [ -f "$REG" ] && tail -n "${2:-30}" "$REG" | cut -c1-140 ;;
+  *) echo "Uso: guarda ligar | desligar | status | varrer ARQ | varredura | quarentena | devolver ID | provar | registro | menu (ou: antivirus)"; exit 2 ;;
+esac

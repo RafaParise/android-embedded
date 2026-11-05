@@ -1,0 +1,322 @@
+"""Testes do comando `cel` do Termux com bash de verdade e adb, settings e am FALSOS. Nenhum toca aparelho."""
+import os
+import pathlib
+import subprocess
+import types
+
+import pytest
+
+SCRIPT = pathlib.Path(os.environ.get("CEL_SCRIPT") or pathlib.Path(__file__).resolve().parent.parent / "celular-kit" / "bin" / "cel")  # mutantes: so em copia
+
+ADB = r"""#!/bin/bash
+echo "adb $*" >> "$FALSO_LOG"
+case "$1" in
+  devices) echo "List of devices attached"; [ -f "$FALSO_DIR/conectado" ] && printf '127.0.0.1:41234\tdevice\n'; exit 0 ;;
+  connect) [ -f "$FALSO_DIR/depuracao" ] && [ "$2" = 127.0.0.1:41234 ] && { touch "$FALSO_DIR/conectado"; echo "connected to $2"; exit 0; }
+           echo "failed to connect to $2"; exit 1 ;;
+  pair) [ "$3" = 123456 ] && { touch "$FALSO_DIR/depuracao"; echo "Successfully paired"; exit 0; }; echo "Failed"; exit 1 ;;
+  -s) shift 2; [ "$1" = shell ] || exit 1; shift; echo "SHELL $*" >> "$FALSO_LOG"
+      case "$*" in
+        *"pm list packages"*) printf 'package:com.exemplo.um\npackage:com.samsung.android.smartmirroring\n' ;;
+        *"settings list"*) echo "bluetooth_on=1" ;;
+        *"df /data"*) echo "/dev/x 100 50 1000 5% /data" ;;
+        *"pgrep -f"*) exit 0 ;;
+        *"uiautomator dump"*) cat "$FALSO_DIR/tela.xml" 2>/dev/null ;;
+        *"isKeyguardShowing"*) [ -f "$FALSO_DIR/bloqueado" ] && echo "isKeyguardShowing=true" ;;
+        *"[T]ela escuro"*) [ -f "$FALSO_DIR/escura" ] && echo 4321 ;;
+        *"ela-vigia.sh vigiar' | head"*) [ -f "$FALSO_DIR/vigia" ] && cat "$FALSO_DIR/vigia" ;;
+        *"grep -c tela-preta"*) [ -f "$FALSO_DIR/escureceu" ] && echo 1 || echo 0 ;;
+        *"setsid nohup sh -c 'sh /data/local/tmp/tela-vigia.sh agora"*) touch "$FALSO_DIR/escureceu" ;;
+      esac; exit 0 ;;
+esac
+"""
+PYTHON = r"""#!/bin/bash
+# no lugar da pergunta mDNS: o Android so responde com a depuracao sem fio ligada; `python3 -c` (ler a tela) e o de verdade
+[ "${1:-}" = -c ] && exec /usr/bin/python3 "$@"
+cat > /dev/null; echo "mdns" >> "$FALSO_LOG"; [ -f "$FALSO_DIR/depuracao" ] && echo 41234; exit 0
+"""
+SETTINGS = r"""#!/bin/bash
+echo "settings $*" >> "$FALSO_LOG"
+[ -f "$FALSO_DIR/permissao" ] || exit 1
+[ "$1" = put ] && touch "$FALSO_DIR/depuracao"
+[ "$1" = get ] && { [ -f "$FALSO_DIR/depuracao" ] && echo 1 || echo 0; }
+exit 0
+"""
+
+
+@pytest.fixture
+def cel(tmp_path):
+    bin_, home = tmp_path / "bin", tmp_path / "home"
+    bin_.mkdir()
+    home.mkdir()
+    for nome, texto in (("adb", ADB), ("settings", SETTINGS), ("am", '#!/bin/bash\necho "am $*" >> "$FALSO_LOG"\n'),
+                        ("timeout", '#!/bin/bash\nshift\nexec "$@"\n'), ("sleep", "#!/bin/bash\nexit 0\n"),
+                        ("python3", PYTHON)):
+        (bin_ / nome).write_text(texto)
+        (bin_ / nome).chmod(0o755)
+    log = tmp_path / "log"
+
+    def roda(*args):
+        env = {"HOME": str(home), "PATH": f"{bin_}:/usr/bin:/bin", "FALSO_LOG": str(log), "FALSO_DIR": str(tmp_path)}
+        p = subprocess.Popen(["/bin/bash", str(SCRIPT), *args], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        saida, _ = p.communicate(timeout=60)
+        return p.returncode, saida
+
+    def registro():
+        return log.read_text() if log.exists() else ""
+
+    return types.SimpleNamespace(roda=roda, registro=registro, dir=tmp_path)
+
+
+def _conectado(cel):
+    (cel.dir / "depuracao").write_text("")
+    (cel.dir / "conectado").write_text("")
+
+
+def test_sintaxe():
+    p = subprocess.Popen(["/bin/bash", "-n", str(SCRIPT)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert p.communicate(timeout=20)[0] == "" and p.returncode == 0
+
+
+def test_sem_depuracao_diz_o_que_fazer_e_nao_roda_nada(cel):
+    rc, s = cel.roda("wifi", "desligar")
+    assert rc == 2 and "Depuracao sem fio" in s and "SHELL" not in cel.registro()
+
+
+def test_conecta_sozinho_pelo_mdns_e_guarda_a_porta(cel):
+    (cel.dir / "depuracao").write_text("")
+    rc, s = cel.roda("conectar")
+    assert rc == 0 and "127.0.0.1:41234" in s and "adb connect 127.0.0.1:41234" in cel.registro()
+    assert (cel.dir / "home" / ".cache" / "cel-porta").read_text().strip() == "41234"
+
+
+def test_porta_guardada_vem_antes_do_mdns_e_porta_velha_cai_no_mdns(cel):
+    (cel.dir / "depuracao").write_text("")
+    (cel.dir / "home" / ".cache").mkdir(parents=True)
+    (cel.dir / "home" / ".cache" / "cel-porta").write_text("41234")
+    assert cel.roda("conectar")[0] == 0 and "mdns" not in cel.registro(), "a porta guardada basta"
+    (cel.dir / "conectado").unlink()
+    (cel.dir / "home" / ".cache" / "cel-porta").write_text("39999")   # a depuracao reiniciou: porta nova
+    assert cel.roda("conectar")[0] == 0 and "adb connect 127.0.0.1:39999" in cel.registro() and "mdns" in cel.registro()
+    assert (cel.dir / "home" / ".cache" / "cel-porta").read_text().strip() == "41234"
+
+
+def test_mdns_aceita_so_a_resposta_do_proprio_aparelho():
+    texto = SCRIPT.read_text(encoding="utf-8")
+    assert "if quem[0] != eu:" in texto and "IP_MULTICAST_IF" in texto
+
+
+def test_religa_a_depuracao_quando_o_termux_tem_permissao(cel):
+    (cel.dir / "permissao").write_text("")
+    rc, s = cel.roda("conectar")
+    assert rc == 0 and "settings put global adb_wifi_enabled 1" in cel.registro()
+
+
+def test_parear_so_aceita_numeros(cel):
+    assert cel.roda("parear", "37a", "123456")[0] == 2
+    assert cel.roda("parear", "37000", "12;rm")[0] == 2
+    assert "adb pair" not in cel.registro()
+    rc, s = cel.roda("parear", "37000", "123456")
+    assert rc == 0 and "Pareado" in s and "adb pair 127.0.0.1:37000 123456" in cel.registro()
+
+
+def test_desligar_wifi_sobrevive_a_queda_da_conexao(cel):
+    _conectado(cel)
+    cel.roda("wifi", "desligar")
+    assert "setsid nohup sh -c 'svc wifi disable'" in cel.registro()
+
+
+def test_reiniciar_wifi_e_internet_em_um_processo_solto(cel):
+    _conectado(cel)
+    cel.roda("wifi", "reiniciar")
+    cel.roda("internet", "reiniciar")
+    r = cel.registro()
+    assert "setsid nohup sh -c 'svc wifi disable; sleep 4; svc wifi enable'" in r
+    assert "airplane-mode enable; sleep 4; cmd connectivity airplane-mode disable" in r
+
+
+def test_ligar_wifi_bluetooth_e_dados(cel):
+    _conectado(cel)
+    assert "Wi-Fi ligado" in cel.roda("wifi", "ligar")[1]
+    assert "Bluetooth ligado" in cel.roda("bluetooth", "ligar")[1]
+    assert "Dados moveis ligado" in cel.roda("dados", "ligar")[1]
+    assert "svc data enable" in cel.registro()
+
+
+@pytest.mark.parametrize("args", [("wifi", "talvez"), ("dados",), ("bluetooth", "x"), ("internet",), ("aviao", "x"), ("depuracao",)])
+def test_uso_errado_nao_roda(cel, args):
+    _conectado(cel)
+    assert cel.roda(*args)[0] == 2 and "svc" not in cel.registro()
+
+
+def test_limpar_usa_trim_caches_e_nunca_clear(cel):
+    _conectado(cel)
+    rc, s = cel.roda("limpar")
+    assert "pm trim-caches 100G" in cel.registro() and "pm clear" not in cel.registro() and "Caches limpos" in s
+
+
+def test_abrir_tela_conhecida_e_recusa_desconhecida(cel):
+    _conectado(cel)
+    assert cel.roda("abrir", "bluetooth")[0] == 0 and "am start -a android.settings.BLUETOOTH_SETTINGS" in cel.registro()
+    assert cel.roda("abrir", "x;reboot")[0] == 2
+
+
+def test_abrir_tela_sem_conexao_usa_o_am_do_termux(cel):
+    assert cel.roda("abrir", "wifi")[0] == 0 and "am start -a android.settings.WIFI_SETTINGS" in cel.registro()
+
+
+def test_abrir_app_valida_o_pacote(cel):
+    _conectado(cel)
+    assert cel.roda("abrir-app", "com.x;reboot")[0] == 2
+    assert cel.roda("abrir-app", "org.fossify.messages")[0] == 0 and "monkey -p org.fossify.messages" in cel.registro()
+
+
+def test_microfone_escreve_os_mesmos_arquivos_do_pc(cel):
+    _conectado(cel)
+    cel.roda("microfone", "sempre")
+    cel.roda("microfone", "mudo")
+    r = cel.registro()
+    assert "echo fixo > /data/local/tmp/mic-bt.modo" in r and "touch /data/local/tmp/mic-celular.bloqueado" in r
+
+
+def test_procurar_junta_arquivos_apps_configuracoes_e_telas(cel):
+    _conectado(cel)
+    rc, s = cel.roda("procurar", "blue")
+    assert "bluetooth_on=1" in s and "cel abrir bluetooth" in s
+
+
+def test_tv_abre_a_transmissao_e_lista_espelhamento(cel):
+    _conectado(cel)
+    rc, s = cel.roda("tv")
+    assert "CAST_SETTINGS" in cel.registro() and "smartmirroring" in s
+
+
+def test_status_sem_conexao_nao_quebra(cel):
+    rc, s = cel.roda("status")
+    assert rc == 0 and "NAO" in s
+
+
+def test_economia_de_dados_usa_o_netpolicy(cel):
+    _conectado(cel)
+    assert cel.roda("economia-dados", "ligar")[0] == 0
+    assert cel.roda("economia-dados", "desligar")[0] == 0
+    assert cel.roda("economia-dados", "status")[0] == 0
+    reg = cel.registro()
+    assert "cmd netpolicy set restrict-background true" in reg and "cmd netpolicy set restrict-background false" in reg
+    assert "cmd netpolicy get restrict-background" in reg
+    assert cel.roda("economia-dados", "comprimir")[0] == 2
+
+
+def test_tela_apagar_usa_os_botoes_da_vigia_e_confere_a_camada(cel):
+    _conectado(cel)
+    rc, s = cel.roda("tela", "apagar")
+    assert rc == 2 and "vigia do gesto" in s and "tela-vigia.sh agora" not in cel.registro(), "sem saber os botoes, nao escurece"
+    (cel.dir / "vigia").write_text("sh /data/local/tmp/tela-vigia.sh vigiar /dev/input/event2 /dev/input/event4 /dev/input/event0\n")
+    rc, s = cel.roda("tela", "apagar")
+    assert rc == 0 and "sem bloqueio" in s, s
+    assert "tela-vigia.sh agora /dev/input/event2 /dev/input/event4 /dev/input/event0" in cel.registro()
+
+
+def test_tela_nao_apaga_com_pin_na_tela_nem_com_botao_estranho(cel):
+    _conectado(cel)
+    (cel.dir / "vigia").write_text("sh /data/local/tmp/tela-vigia.sh vigiar /dev/input/event2;reboot\n")
+    assert cel.roda("tela", "apagar")[0] == 2 and "agora" not in cel.registro()
+    (cel.dir / "bloqueado").write_text("")
+    rc, s = cel.roda("tela", "apagar")
+    assert rc == 2 and "PIN" in s
+
+
+def test_tela_acender_mata_a_camada_e_devolve_o_brilho(cel):
+    _conectado(cel)
+    assert cel.roda("tela", "acender")[0] == 0
+    assert "Tela luz volta" in cel.registro() and "kill" in cel.registro()
+    (cel.dir / "escura").write_text("")
+    assert "escura" in cel.roda("tela", "status")[1]
+
+
+CURL_FALSO = r"""#!/bin/bash
+echo "curl $*" >> "$FALSO_LOG"
+for a in "$@"; do case "$a" in */saude) printf 200; exit 0 ;; */mcp) cat > "$FALSO_DIR/curl-config"; touch "$FALSO_DIR/depuracao"; exit 0 ;; esac; done
+exit 7
+"""
+
+
+def test_depuracao_desligada_o_cel_pede_ao_pc_pelo_cabo_e_conecta(cel):
+    (cel.dir / "home" / ".qwen").mkdir(parents=True)
+    (cel.dir / "home" / ".qwen" / ".env").write_text("PONTE_PC_TOKEN=token-de-teste-" + "x" * 30 + "\n")
+    (cel.dir / "bin" / "curl").write_text(CURL_FALSO)
+    (cel.dir / "bin" / "curl").chmod(0o755)
+    rc, s = cel.roda("conectar")
+    assert rc == 0, s
+    reg = cel.registro()
+    assert "depuracao-sem-fio-ligar" in reg and "token-de-teste" not in reg, "o token vai pela entrada padrao do curl"
+    assert "Bearer token-de-teste" in (cel.dir / "curl-config").read_text()
+
+
+def test_sem_token_o_cel_nao_chama_a_ponte(cel):
+    (cel.dir / "bin" / "curl").write_text(CURL_FALSO)
+    (cel.dir / "bin" / "curl").chmod(0o755)
+    assert cel.roda("conectar")[0] == 2
+    assert "curl" not in cel.registro()
+
+
+TELA_APP = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">
+<node index="0" text="" package="com.android.settings" class="android.widget.FrameLayout" clickable="false" bounds="[0,0][720,1600]">
+<node text="Moonlight" resource-id="android:id/title" class="android.widget.TextView" package="com.android.settings" clickable="false" bounds="[100,100][400,160]" />
+<node text="Abrir" resource-id="com.android.settings:id/button1" class="android.widget.Button" package="com.android.settings" clickable="true" bounds="[0,600][240,700]" />
+<node text="Desinstalar" resource-id="com.android.settings:id/button2" class="android.widget.Button" package="com.android.settings" clickable="true" bounds="[240,600][480,700]" />
+<node text="Ligar para 11 98765-4321 ou fulano@x.com" class="android.widget.TextView" package="com.android.settings" clickable="false" bounds="[0,800][720,860]" />
+</node></hierarchy>"""
+
+
+def test_ler_lista_a_tela_e_mascara_dados(cel):
+    _conectado(cel)
+    (cel.dir / "tela.xml").write_text(TELA_APP)
+    rc, s = cel.roda("ler")
+    assert rc == 0 and "com.android.settings" in s
+    assert "Abrir [botao] (120,650)" in s and "Desinstalar [botao]" in s
+    assert "98765" not in s and "fulano@" not in s and "[numero]" in s and "[e-mail]" in s
+
+
+def test_tocar_por_texto_e_por_numero(cel):
+    _conectado(cel)
+    (cel.dir / "tela.xml").write_text(TELA_APP)
+    rc, s = cel.roda("tocar", "Abrir")
+    assert rc == 0 and "SHELL input tap 120 650" in cel.registro()
+    cel.roda("ler")
+    rc, s = cel.roda("tocar", "2")
+    assert rc == 0 and cel.registro().count("SHELL input tap 120 650") == 2
+
+
+def test_tocar_recusa_botao_sem_volta(cel):
+    _conectado(cel)
+    (cel.dir / "tela.xml").write_text(TELA_APP)
+    rc, s = cel.roda("tocar", "desinstalar")
+    assert rc == 3 and "Recusado" in s
+    rc, s = cel.roda("tocar", "360", "650")  # por coordenada, em cima do botao: tambem recusa
+    assert rc == 3
+    assert "input tap" not in cel.registro()
+
+
+def test_tocar_recusa_tudo_na_tela_de_autorizar_depuracao(cel):
+    _conectado(cel)
+    (cel.dir / "tela.xml").write_text(TELA_APP.replace("Moonlight", "Permitir depuração USB?").replace("Desinstalar", "Cancelar"))
+    rc, s = cel.roda("tocar", "Abrir")
+    assert rc == 3 and "input tap" not in cel.registro()
+
+
+def test_tecla_nao_tem_liga_desliga(cel):
+    _conectado(cel)
+    rc, s = cel.roda("tecla", "power")
+    assert rc == 2 and "keyevent" not in cel.registro()
+    rc, s = cel.roda("tecla", "voltar")
+    assert rc == 0 and "SHELL input keyevent 4" in cel.registro()
+
+
+def test_palavra_perigosa_em_texto_comum_nao_trava_a_tela(cel):
+    _conectado(cel)
+    (cel.dir / "tela.xml").write_text(TELA_APP.replace("Moonlight", "Formatar numeros de telefone"))
+    rc, s = cel.roda("tocar", "Abrir")
+    assert rc == 0 and "SHELL input tap 120 650" in cel.registro()
+    rc, s = cel.roda("tocar", "Formatar numeros de telefone")
+    assert rc == 3

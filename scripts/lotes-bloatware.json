@@ -1,0 +1,609 @@
+{
+  "A1": {
+    "aplicavel": true,
+    "descricao": "Meta e OEM: stubs do Facebook, recomendacao e instalacao automatica de apps, coleta de dados, modo crianca, push e atualizador Samsung",
+    "pacotes": [
+      "com.facebook.appmanager",
+      "com.facebook.services",
+      "com.facebook.system",
+      "com.samsung.android.app.omcagent",
+      "com.samsung.android.rubin.app",
+      "com.samsung.android.kidsinstaller",
+      "com.samsung.android.mapsagent",
+      "com.sec.spp.push",
+      "com.samsung.android.app.updatecenter"
+    ]
+  },
+  "A1b": {
+    "aplicavel": true,
+    "descricao": "Digital Turbine (com.dti.samsung, instalador de apps da operadora): UAD Recommended; apos o reinicio de 27/10 quebrava na inicializacao (NPE em UIController.getIgniteConnector)",
+    "pacotes": [
+      "com.dti.samsung"
+    ]
+  },
+  "A2": {
+    "aplicavel": true,
+    "descricao": "Jogos Samsung: Game Tools e Game Optimizing Service (reverter se algum jogo esquentar ou perder desempenho)",
+    "pacotes": [
+      "com.samsung.android.game.gametools",
+      "com.samsung.android.game.gos"
+    ]
+  },
+  "B": {
+    "aplicavel": true,
+    "descricao": "Lote B (liberado pelo Rafael em 27/10): app Google/Assistente, Mobile Services, Bem-estar digital Samsung, Theme Store",
+    "pacotes": [
+      "com.google.android.googlequicksearchbox",
+      "com.samsung.android.mobileservice",
+      "com.samsung.android.forest",
+      "com.samsung.android.themestore"
+    ]
+  },
+  "S1": {
+    "aplicavel": true,
+    "descricao": "Lista de remocao do script original, itens sem substituto: clima e nuvem Samsung, analytics do Knox, MDM (aparelho sem dono: dpm list-owners = no owners), recomendacao de impressao, Galaxy Store",
+    "permitidos": [
+      "com.samsung.android.knox.analytics.uploader"
+    ],
+    "pacotes": [
+      "com.sec.android.daemonapp",
+      "com.samsung.android.scloud",
+      "com.samsung.android.knox.analytics.uploader",
+      "com.samsung.android.mdm",
+      "com.google.android.printservice.recommendation",
+      "com.sec.android.app.samsungapps"
+    ]
+  },
+  "S2a": {
+    "aplicavel": true,
+    "descricao": "Conta Samsung. UAD: so quebra as Configuracoes no Android 11; o aparelho esta no Android 12. Testar Configuracoes e reverter se cair",
+    "permitidos": [
+      "com.osp.app.signin"
+    ],
+    "pacotes": [
+      "com.osp.app.signin"
+    ]
+  },
+  "S2b": {
+    "aplicavel": true,
+    "descricao": "Samsung Device Health Manager (sdhms), listado como Device Health Services no script. Testar a pagina de bateria e reverter se cair",
+    "pacotes": [
+      "com.sec.android.sdhms"
+    ]
+  },
+  "FOSS-camera": {
+    "aplicavel": true,
+    "descricao": "Camera Samsung -> Open Camera e Google Maps -> Organic Maps (o executor exige o substituto instalado e ativo)",
+    "substitutos": {
+      "com.sec.android.app.camera": "net.sourceforge.opencamera",
+      "com.google.android.apps.maps": "app.organicmaps"
+    },
+    "pacotes": [
+      "com.sec.android.app.camera",
+      "com.google.android.apps.maps"
+    ]
+  },
+  "FOSS-galeria": {
+    "aplicavel": true,
+    "descricao": "Galeria -> Fossify Gallery, Meus Arquivos -> Fossify File Manager, Samsung Video -> VLC. Aplicar so depois do FOSS-camera (a Galeria Samsung e dependencia da camera Samsung). Sem Meus Arquivos, as Configuracoes perdem o botao de ejetar/formatar o cartao: usar `sm` por ADB ou reativar o pacote",
+    "substitutos": {
+      "com.sec.android.gallery3d": "org.fossify.gallery",
+      "com.sec.android.app.myfiles": "org.fossify.filemanager",
+      "com.samsung.android.video": "org.videolan.vlc"
+    },
+    "pacotes": [
+      "com.sec.android.gallery3d",
+      "com.sec.android.app.myfiles",
+      "com.samsung.android.video"
+    ]
+  },
+  "FOSS-teclado": {
+    "aplicavel": true,
+    "descricao": "Gboard e teclado Samsung -> HeliBoard (fork mantido do OpenBoard). So depois de o HeliBoard ser o teclado padrao e aceitar o boot direto",
+    "substitutos": {
+      "com.google.android.inputmethod.latin": "helium314.keyboard",
+      "com.samsung.android.honeyboard": "helium314.keyboard"
+    },
+    "pacotes": [
+      "com.google.android.inputmethod.latin",
+      "com.samsung.android.honeyboard"
+    ]
+  },
+  "OTA": {
+    "aplicavel": true,
+    "descricao": "Agentes de atualizacao OTA da Samsung (listados em 4 versoes do script). Sem eles o aparelho nao recebe patches de seguranca pelo sistema: reativar para atualizar",
+    "pacotes": [
+      "com.wssyncmldm",
+      "com.sec.android.soagent"
+    ]
+  },
+  "G1": {
+    "aplicavel": true,
+    "descricao": "Google extra sem substituto necessario: Gemini, AR e Lens, gerenciador de dispositivo (aparelho sem dono), Maps Go, configuracao de parceiros, historico de localizacao, feedback",
+    "permitidos": [
+      "com.google.android.gms.location.history"
+    ],
+    "pacotes": [
+      "com.google.android.apps.bard",
+      "com.google.ar.core",
+      "com.google.ar.lens",
+      "com.google.android.apps.work.clouddpc",
+      "com.google.android.apps.navlite",
+      "com.google.android.partnersetup",
+      "com.google.android.gms.location.history",
+      "com.google.android.feedback",
+      "com.google.android.onetimeinitializer"
+    ]
+  },
+  "G2": {
+    "aplicavel": true,
+    "descricao": "Google mais sensivel (testar push e Play Integrity depois): SafetyCore (varredura de conteudo por ML), telemetria dos modulos Mainline, chaves de contato do Google Messages",
+    "pacotes": [
+      "com.google.android.safetycore",
+      "com.google.mainline.telemetry",
+      "com.google.android.contactkeys"
+    ]
+  },
+  "LINK": {
+    "aplicavel": true,
+    "descricao": "Restos do Link to Windows da Samsung (o Phone Link da Microsoft nao esta instalado): substituido por KDE Connect, scrcpy e Area de Trabalho Remota",
+    "pacotes": [
+      "com.samsung.android.mdx.kit",
+      "com.samsung.android.mdx.quickboard"
+    ]
+  },
+  "S3": {
+    "aplicavel": true,
+    "descricao": "Samsung 'Tier A' (UAD Recommended/Advanced lidos um a um): telemetria e diagnostico, borda/S Pen/AR, Smart Switch, Quick Share, ferramentas de fabrica e teste, servicos de Galeria/Notas ja substituidos. Fora: Knox, localizacao, telefonia, acessibilidade, seguranca",
+    "pacotes": [
+      "android.autoinstalls.config.samsung",
+      "com.debug.loggerui",
+      "com.hiya.star",
+      "com.netflix.partner.activation",
+      "com.samsung.android.aircommandmanager",
+      "com.samsung.android.allshare.service.mediashare",
+      "com.samsung.android.app.cocktailbarservice",
+      "com.samsung.android.app.settings.bixby",
+      "com.samsung.android.app.sharelive",
+      "com.samsung.android.app.taskedge",
+      "com.samsung.android.app.watchmanagerstub",
+      "com.samsung.android.beaconmanager",
+      "com.samsung.android.da.daagent",
+      "com.samsung.android.dsms",
+      "com.samsung.android.easysetup",
+      "com.samsung.android.fast",
+      "com.samsung.android.fmm",
+      "com.samsung.android.livestickers",
+      "com.samsung.android.mcfds",
+      "com.samsung.android.privateshare",
+      "com.samsung.android.sdk.handwriting",
+      "com.samsung.android.sdm.config",
+      "com.samsung.android.server.wifi.mobilewips",
+      "com.samsung.android.service.peoplestripe",
+      "com.samsung.android.shortcutbackupservice",
+      "com.samsung.android.smartcallprovider",
+      "com.samsung.android.smartswitchassistant",
+      "com.samsung.android.stickercenter",
+      "com.samsung.android.svcagent",
+      "com.samsung.android.uds",
+      "com.samsung.crane",
+      "com.samsung.mlp",
+      "com.samsung.rcs",
+      "com.samsung.safetyinformation",
+      "com.sec.android.RilServiceModeApp",
+      "com.sec.android.app.DataCreate",
+      "com.sec.android.app.bluetoothtest",
+      "com.sec.android.app.hwmoduletest",
+      "com.sec.android.app.wlantest",
+      "com.sec.android.app.servicemodeapp",
+      "com.sec.android.app.factorykeystring",
+      "com.sec.android.app.chromecustomizations",
+      "com.sec.android.app.parser",
+      "com.sec.android.app.quicktool",
+      "com.sec.android.app.setupwizardlegalprovider",
+      "com.sec.android.app.ve.vebgm",
+      "com.sec.android.easyMover.Agent",
+      "com.sec.android.smartfpsadjuster",
+      "com.sec.app.RilErrorNotifier",
+      "com.sec.bcservice",
+      "com.sec.epdgtestapp",
+      "com.sec.factory",
+      "com.sec.factory.camera",
+      "com.sec.factory.cameralyzer",
+      "com.sec.imslogger",
+      "com.samsung.android.dqagent",
+      "com.samsung.android.mcfserver",
+      "com.samsung.cmh",
+      "com.samsung.storyservice"
+    ]
+  },
+  "FOSS-agenda": {
+    "aplicavel": true,
+    "descricao": "Calendario Samsung -> Fossify Calendar e Calculadora Samsung -> Fossify Calculator (os eventos ficam no provider do sistema; teste um lembrete)",
+    "substitutos": {
+      "com.samsung.android.calendar": "org.fossify.calendar",
+      "com.sec.android.app.popupcalculator": "org.fossify.math"
+    },
+    "pacotes": [
+      "com.samsung.android.calendar",
+      "com.sec.android.app.popupcalculator"
+    ]
+  },
+  "S4": {
+    "aplicavel": true,
+    "descricao": "Samsung segunda leva (inventario.py + descricao UAD-ng): recursos que dependiam de Galeria/Camera/Video Samsung (editor de foto e video, foco ao vivo, rostos), Quick Share/Wi-Fi Direct, McAfee do Device Care, tela de bloqueio dinamica, fundo de chamada, uso com uma mao, lupa, Adapt Sound, SIM virtual, Wi-Fi da operadora, apps separados, MdAgent. Fora: captive portal, setup wizards, TalkBack, Edge, Face unlock, filtro de luz azul, area de transferencia, FM",
+    "pacotes": [
+      "com.sec.vsim.ericssonnsds.webapp",
+      "com.sec.hearingadjust",
+      "com.sec.android.easyonehand",
+      "com.sec.enterprise.mdm.services.simpin",
+      "com.sec.android.app.magnifier",
+      "com.samsung.app.newtrim",
+      "com.sec.android.mimage.photoretouching",
+      "com.samsung.android.app.dofviewer",
+      "com.samsung.android.allshare.service.fileshare",
+      "com.samsung.android.aware.service",
+      "com.samsung.android.sm.devicesecurity",
+      "com.samsung.android.dynamiclock",
+      "com.samsung.android.callbgprovider",
+      "com.google.android.apps.carrier.carrierwifi",
+      "com.samsung.android.appseparation",
+      "com.samsung.faceservice",
+      "com.samsung.android.mdagent"
+    ]
+  },
+  "FOSS-video": {
+    "aplicavel": true,
+    "descricao": "YouTube -> NewPipe (sem conta Google, sem anuncios, sem telemetria; importa inscricoes). Reativar o YouTube: pm enable com.google.android.youtube",
+    "substitutos": {
+      "com.google.android.youtube": "org.schabi.newpipe"
+    },
+    "pacotes": [
+      "com.google.android.youtube"
+    ]
+  },
+  "STK": {
+    "aplicavel": true,
+    "descricao": "Menu da operadora no chip (SIM Toolkit). Sem uso comum; reativar se o menu da operadora fizer falta",
+    "permitidos": [
+      "com.android.stk",
+      "com.android.stk2"
+    ],
+    "pacotes": [
+      "com.android.stk",
+      "com.android.stk2"
+    ]
+  },
+  "FOSS-contatos-relogio": {
+    "aplicavel": true,
+    "descricao": "Contatos Samsung -> Fossify Contatos (os contatos ficam no provedor do sistema, sem migracao) e Relogio Samsung -> Fossify Relogio (alarme das 05:00 conferido; sem widgets na tela inicial). Reativar: pm enable com.samsung.android.app.contacts com.sec.android.app.clockpackage",
+    "substitutos": {
+      "com.samsung.android.app.contacts": "org.fossify.contacts",
+      "com.sec.android.app.clockpackage": "org.fossify.clock"
+    },
+    "pacotes": [
+      "com.samsung.android.app.contacts",
+      "com.sec.android.app.clockpackage"
+    ]
+  },
+  "FOSS-navegador": {
+    "aplicavel": true,
+    "descricao": "Chrome -> Fennec F-Droid (navegador padrao, sem Google/telemetria). Os 693 MB de dados do Chrome ficam guardados, so inacessiveis; sem WebAPKs instalados. Reativar: pm enable com.android.chrome",
+    "substitutos": {
+      "com.android.chrome": "org.mozilla.fennec_fdroid"
+    },
+    "pacotes": [
+      "com.android.chrome"
+    ]
+  },
+  "FOSS-notas": {
+    "aplicavel": true,
+    "descricao": "Samsung Notes -> Fossify Notas. Desativar NAO apaga as 10,8 MB de notas do app: para exportar antes de migrar, reative (pm enable com.samsung.android.app.notes), use Compartilhar > Salvar como arquivo e importe os .txt no Fossify Notas",
+    "substitutos": {
+      "com.samsung.android.app.notes": "org.fossify.notes"
+    },
+    "pacotes": [
+      "com.samsung.android.app.notes"
+    ]
+  },
+  "S5": {
+    "aplicavel": true,
+    "descricao": "Revisao dos nativos em 28/10 (auditoria-nativos.py): servicos Samsung sem funcao para o Rafael que acessam dados ou rede. Samsung Core Services (agenda, contatos, ligacoes, SMS e arquivos com internet), busca Finder, historico de area de transferencia, agente de conteiner Knox, politica AASA (UAD: gasta bateria) e provedor NSFLP2. FICA ativo: appsedge (UAD: desativar quebra a tela dividida do dashcam), klmsagent (Knox), lool (Cuidados do dispositivo), smartcapture (capturas de tela). Reativar: pm enable <pacote>",
+    "permitidos": [
+      "com.samsung.android.scs",
+      "com.samsung.android.app.galaxyfinder",
+      "com.samsung.clipboardsaveservice",
+      "com.samsung.android.bbc.bbcagent",
+      "com.samsung.aasaservice",
+      "com.sec.location.nsflp2"
+    ],
+    "pacotes": [
+      "com.samsung.android.scs",
+      "com.samsung.android.app.galaxyfinder",
+      "com.samsung.clipboardsaveservice",
+      "com.samsung.android.bbc.bbcagent",
+      "com.samsung.aasaservice",
+      "com.sec.location.nsflp2"
+    ]
+  },
+  "S6": {
+    "aplicavel": true,
+    "permitidos": [],
+    "descricao": "Samsung terceira leva (30/10, pedido do Rafael: fora os nativos que nao impedem a Play Store): TTS Samsung, HDM (Knox hypervisor, UAD Recommended), SmartFace e filtros da camera Samsung (camera ja e Open Camera), monitor de volume do Digital Wellbeing e Personalization Service. O Radio FM (com.sec.android.app.fm) SAIU deste lote: o Rafael o quer (30/10; chip FM mt6631) e foi reativado com pm enable. O Edge de apps (com.samsung.android.app.appsedge) tambem SAIU, por teste A/B no aparelho em 30/10: desativado, 'Abrir na exibicao em tela dividida' dos Recentes nao faz nada (logcat: ActivityNotFoundException em FromRecentEdgeActivity); ativo, a divisao abre e o dashcam grava (Organic Maps + Open Camera). Agora e PROTEGIDO em lote-pacotes.py. Reverter: lote-pacotes.py S6 --restaurar.",
+    "pacotes": [
+      "com.samsung.SMT",
+      "com.samsung.android.hdmapp",
+      "com.samsung.android.smartface",
+      "com.samsung.android.provider.filterprovider",
+      "com.sec.android.app.volumemonitorprovider",
+      "com.sec.android.app.personalization"
+    ]
+  },
+  "S7": {
+    "aplicavel": true,
+    "permitidos": [],
+    "descricao": "Samsung quarta leva (30/10): app de teste do brilho adaptativo, Tethering Automation (so o atalho de compartilhar internet por cabo; o compartilhamento das Configuracoes segue) e Service provider location (UAD Recommended). Knox, Setup Wizard, VoLTE/IMS, Dialer e emergencia ficam. Reverter: lote-pacotes.py S7 --restaurar.",
+    "pacotes": [
+      "com.samsung.adaptivebrightnessgo",
+      "com.sec.automation",
+      "com.sec.location.nfwlocationprivacy"
+    ]
+  },
+  "R1": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 1/7 (30/10): rastreio, recomendacao e atualizadores Samsung/Meta (stubs do Facebook, coleta de dados, push, MDM, nuvem Samsung, clima). 13 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R1 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.dti.samsung",
+      "com.facebook.appmanager",
+      "com.facebook.services",
+      "com.facebook.system",
+      "com.samsung.android.app.omcagent",
+      "com.samsung.android.app.updatecenter",
+      "com.samsung.android.kidsinstaller",
+      "com.samsung.android.mapsagent",
+      "com.samsung.android.mdm",
+      "com.samsung.android.rubin.app",
+      "com.samsung.android.scloud",
+      "com.sec.android.daemonapp",
+      "com.sec.spp.push"
+    ]
+  },
+  "R2": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 2/7 (30/10): Google e terceiros sem uso aqui (Meet/Duo, restauracao, OneDrive, Opera Max, feedback, AR Core). 7 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. O Gmail (com.google.android.gm) SAIU deste lote: o Rafael mandou restaura-lo em 30/10 (cmd package install-existing) e ele esta ativo. Desfazer: lote-pacotes.py R2 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.google.android.apps.restore",
+      "com.google.android.apps.tachyon",
+      "com.google.android.feedback",
+      "com.google.android.onetimeinitializer",
+      "com.google.ar.core",
+      "com.microsoft.skydrive",
+      "com.opera.max.oem"
+    ]
+  },
+  "R3": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 3/7 (30/10): Samsung S3, parte 1/3: servicos de experiencia, Bixby, compartilhamento e telemetria. 18 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R3 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "android.autoinstalls.config.samsung",
+      "com.debug.loggerui",
+      "com.hiya.star",
+      "com.netflix.partner.activation",
+      "com.samsung.android.aircommandmanager",
+      "com.samsung.android.allshare.service.mediashare",
+      "com.samsung.android.app.cocktailbarservice",
+      "com.samsung.android.app.settings.bixby",
+      "com.samsung.android.app.sharelive",
+      "com.samsung.android.app.taskedge",
+      "com.samsung.android.app.watchmanagerstub",
+      "com.samsung.android.beaconmanager",
+      "com.samsung.android.da.daagent",
+      "com.samsung.android.dsms",
+      "com.samsung.android.easysetup",
+      "com.samsung.android.fast",
+      "com.samsung.android.fmm",
+      "com.samsung.android.livestickers"
+    ]
+  },
+  "R4": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 4/7 (30/10): Samsung S3, parte 2/3: servicos de experiencia, Bixby, compartilhamento e telemetria. 18 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R4 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.samsung.android.mcfds",
+      "com.samsung.android.privateshare",
+      "com.samsung.android.sdk.handwriting",
+      "com.samsung.android.sdm.config",
+      "com.samsung.android.service.peoplestripe",
+      "com.samsung.android.shortcutbackupservice",
+      "com.samsung.android.smartcallprovider",
+      "com.samsung.android.smartswitchassistant",
+      "com.samsung.android.stickercenter",
+      "com.samsung.android.svcagent",
+      "com.samsung.android.uds",
+      "com.samsung.crane",
+      "com.samsung.mlp",
+      "com.samsung.rcs",
+      "com.samsung.safetyinformation",
+      "com.sec.android.RilServiceModeApp",
+      "com.sec.android.app.DataCreate",
+      "com.sec.android.app.bluetoothtest"
+    ]
+  },
+  "R5": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 5/7 (30/10): Samsung S3, parte 3/3: ferramentas de fabrica, teste de hardware e modo de servico. 16 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R5 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.sec.android.app.chromecustomizations",
+      "com.sec.android.app.factorykeystring",
+      "com.sec.android.app.hwmoduletest",
+      "com.sec.android.app.parser",
+      "com.sec.android.app.quicktool",
+      "com.sec.android.app.servicemodeapp",
+      "com.sec.android.app.ve.vebgm",
+      "com.sec.android.app.wlantest",
+      "com.sec.android.easyMover.Agent",
+      "com.sec.android.smartfpsadjuster",
+      "com.sec.app.RilErrorNotifier",
+      "com.sec.bcservice",
+      "com.sec.factory",
+      "com.sec.factory.camera",
+      "com.sec.factory.cameralyzer",
+      "com.sec.imslogger"
+    ]
+  },
+  "R6": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 6/7 (30/10): Samsung S4 e S5: reconhecimento facial, lupa, uma mao, audicao, agentes de servico. 9 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R6 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.samsung.aasaservice",
+      "com.samsung.android.bbc.bbcagent",
+      "com.samsung.faceservice",
+      "com.sec.android.app.magnifier",
+      "com.sec.android.easyonehand",
+      "com.sec.enterprise.mdm.services.simpin",
+      "com.sec.hearingadjust",
+      "com.sec.location.nsflp2",
+      "com.sec.vsim.ericssonnsds.webapp"
+    ]
+  },
+  "R7": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: remover de fato o que ja esta desativado (telemetria, bloatware, servicos sem uso)",
+    "permitidos": [],
+    "descricao": "Remocao de fato 7/7 (30/10): Samsung diversos: Game Tools, MDX, S6, S7, area de transferencia da borda, manual, Game Home (o Game Optimizing Service NAO sai: o uninstall responde Success mas o pacote volta ativo; ele fica desativado pelo lote A2). 10 pacote(s) ja desativados, todos UAD-ng Recommended; pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R7 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.samsung.adaptivebrightnessgo",
+      "com.samsung.android.app.clipboardedge",
+      "com.samsung.android.cmfa.framework",
+      "com.samsung.android.game.gamehome",
+      "com.samsung.android.game.gametools",
+      "com.samsung.android.hdmapp",
+      "com.samsung.android.mdx.kit",
+      "com.sec.android.app.volumemonitorprovider",
+      "com.sec.android.usermanual",
+      "com.sec.location.nfwlocationprivacy"
+    ]
+  },
+  "R8": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 30/10: tirar 'Saude e bem-estar' das Configuracoes (o app ja esta desativado e a entrada virou link morto)",
+    "permitidos": [],
+    "descricao": "Bem-estar digital e controles parentais da Samsung (pedido do Rafael, 30/10): o app com.samsung.android.forest ja esta desativado, mas a entrada 'Bem-estar digital e controles parentais' das Configuracoes continua como link morto; a ideia era que, ao REMOVER o pacote (e nao so desativar), a tela escondesse a entrada. APLICADO em 30/10 e NAO funcionou [Certo: teste no aparelho]: o pacote saiu do usuario 0, mas a entrada continua na lista e, ao tocar, as Configuracoes FECHAM (FATAL EXCEPTION em com.android.settings: ActivityNotFoundException em com.samsung.android.forest.home.DefaultActivity; com o app so desativado o crash era o mesmo). A entrada e desenhada pelo proprio Configuracoes da Samsung; sem root nao ha como esconde-la. Nao toque nela. UAD-ng: Advanced. Desfazer: lote-pacotes.py R8 --restaurar (cmd package install-existing).",
+    "pacotes": [
+      "com.samsung.android.forest"
+    ]
+  },
+  "R9": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 04/11, ao perguntar 'remover DroidCamX, Gboard, SafetyCore, Android Device Policy e os ja desativados?': 'Pode sim por favor'",
+    "permitidos": [
+      "com.google.android.inputmethod.latin"
+    ],
+    "substitutos": {
+      "com.google.android.inputmethod.latin": "helium314.keyboard"
+    },
+    "descricao": "Remocao 04/11: DroidCamX (webcam = scrcpy), Gboard (HeliBoard em uso), SafetyCore e Android Device Policy (nenhum dono ou administrador no aparelho, conferido antes). pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R9 --restaurar.",
+    "pacotes": [
+      "com.dev47apps.droidcamx",
+      "com.google.android.inputmethod.latin",
+      "com.google.android.safetycore",
+      "com.google.android.apps.work.clouddpc"
+    ]
+  },
+  "R10": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 04/11, ao perguntar 'remover DroidCamX, Gboard, SafetyCore, Android Device Policy e os ja desativados?': 'Pode sim por favor'",
+    "descricao": "Remocao 04/11: o que ja estava desativado, menos o protegido (SIM, gms, conta Samsung, teclado reserva, SMS, Knox, emergencia, game.gos, que volta sozinho, setup wizard e os dois de chamada por Wi-Fi). Inclui Caixa Tem, Poupatempo Digital e Steam, que o Rafael autorizou. Nao libera espaco de app de sistema. pm uninstall -k --user 0 mantem os dados. Desfazer: lote-pacotes.py R10 --restaurar. O com.sec.android.sdhms (Device Care) saiu do lote: o uninstall falhou e ele ficou ativo; foi desativado de novo a mao em 04/11.",
+    "pacotes": [
+      "br.gov.caixa.tem",
+      "br.gov.sp.prodesp.pptdigital",
+      "com.google.android.apps.bard",
+      "com.google.android.apps.carrier.carrierwifi",
+      "com.google.android.apps.navlite",
+      "com.google.android.contactkeys",
+      "com.google.android.googlequicksearchbox",
+      "com.google.android.partnersetup",
+      "com.google.android.printservice.recommendation",
+      "com.google.android.projection.gearhead",
+      "com.google.mainline.telemetry",
+      "com.samsung.SMT",
+      "com.samsung.android.allshare.service.fileshare",
+      "com.samsung.android.app.dofviewer",
+      "com.samsung.android.app.galaxyfinder",
+      "com.samsung.android.appseparation",
+      "com.samsung.android.aware.service",
+      "com.samsung.android.callbgprovider",
+      "com.samsung.android.dqagent",
+      "com.samsung.android.dynamiclock",
+      "com.samsung.android.lool",
+      "com.samsung.android.mcfserver",
+      "com.samsung.android.mdagent",
+      "com.samsung.android.mdx.quickboard",
+      "com.samsung.android.mobileservice",
+      "com.samsung.android.provider.filterprovider",
+      "com.samsung.android.scs",
+      "com.samsung.android.sm.devicesecurity",
+      "com.samsung.android.smartface",
+      "com.samsung.android.themestore",
+      "com.samsung.app.newtrim",
+      "com.samsung.clipboardsaveservice",
+      "com.samsung.cmfa.AuthTouch",
+      "com.samsung.cmh",
+      "com.samsung.storyservice",
+      "com.sec.android.app.personalization",
+      "com.sec.android.app.samsungapps",
+      "com.sec.android.mimage.photoretouching",
+      "com.sec.android.soagent",
+      "com.sec.automation",
+      "com.valvesoftware.android.steam.community",
+      "com.wssyncmldm"
+    ]
+  },
+  "R11": {
+    "aplicavel": true,
+    "remocao_autorizada": "Rafael, 04/11: 'Tem muitos recursos da samsung no meu telefone, drivers e coisas assim, remova tudo'. Removido so o seguro; o resto sustenta chamada, Wi-Fi, tela inicial e configuracoes.",
+    "descricao": "Samsung sem falta: fontes (UAD Recommended), ajustes ocultos de rede (ipservice), configuracao por SMS da operadora (wsomacp), Dolby e equalizador (soundalive; some o ladrilho), provedor de teste de fabrica. pm uninstall -k --user 0. Desfazer: lote-pacotes.py R11 --restaurar.",
+    "pacotes": [
+      "com.monotype.android.font.foundation",
+      "com.monotype.android.font.samsungone",
+      "com.samsung.ipservice",
+      "com.wsomacp",
+      "com.sec.android.app.soundalive",
+      "com.samsung.android.providers.factory"
+    ]
+  },
+  "R12": {
+    "aplicavel": true,
+    "substitutos": {
+      "com.samsung.android.honeyboard": "helium314.keyboard",
+      "com.samsung.android.messaging": "org.fossify.messages"
+    },
+    "descricao": "Rafael, 04/11: 'remove o quick share e tudo que ja substituiu por apps de codigo aberto'. Teclado e Mensagens Samsung, ja desativados e com substituto em uso. Sem teclado reserva: se o HeliBoard falhar, restaurar com lote-pacotes.py R12 --restaurar. Desfazer: o mesmo comando.",
+    "pacotes": [
+      "com.samsung.android.honeyboard",
+      "com.samsung.android.messaging"
+    ]
+  },
+  "FOSS-telefone": {
+    "aplicavel": true,
+    "substitutos": {
+      "com.samsung.android.dialer": "org.fossify.phone"
+    },
+    "descricao": "Rafael, 05/11: 'o app telefone da samsung ainda esta ativo, remova para sempre'. O Telefone Fossify ja e o discador padrao (papel DIALER). Ficam ativos e protegidos: com.samsung.android.incallui (tela de chamada), com.samsung.android.app.telephonyui (Chamada de emergencia da tela de bloqueio, conferido em 05/11: EmergencyDialerActivity) e com.android.phone. Desfazer: lote-pacotes.py FOSS-telefone --restaurar.",
+    "pacotes": [
+      "com.samsung.android.dialer"
+    ]
+  }
+}

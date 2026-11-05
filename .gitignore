@@ -1,0 +1,14 @@
+# Saidas locais (tem dados do SEU aparelho): nunca vao ao GitHub
+diagnostico/
+*.apk
+*.dex
+*.jks
+*.senha
+*.idsig
+__pycache__/
+*.pyc
+.pytest_cache/
+# chaves e configuracoes pessoais
+.env
+*.env
+config.local.*

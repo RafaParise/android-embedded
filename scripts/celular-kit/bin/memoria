@@ -1,0 +1,708 @@
+#!/data/data/com.termux/files/usr/bin/python3
+"""memoria - a memoria local do Matrix no celular: le, busca e guarda o que ele aprende (so texto, so no celular).
+
+  memoria buscar TEXTO [-n 8]       procura em tudo (aparelho, apps, projetos, o que foi aprendido); comece TODA tarefa por aqui
+  memoria ler TOPICO                mostra um topico inteiro (memoria topicos lista os nomes)
+  memoria topicos                   lista os topicos, tamanho e data
+  memoria lembrar TOPICO "fato"     guarda um fato aprendido (data no comeco; recusa senha, chave, token, e-mail, CPF e dado de aluno)
+  memoria esquecer TOPICO "trecho"  tira do que foi aprendido as linhas com o trecho (vai para a lixeira, nada se apaga)
+  memoria atualizar [--pc|--auto]   refaz aparelho, apps, comandos e os projetos do cartao SD (sd-*) a partir do proprio celular;
+                                     --pc traz do PC (pela ponte, com token) os documentos do projeto, o que o Claude fez nos
+                                     ultimos dias, o ARENA e os LEIA-ME dos outros projetos; --auto = tudo o que der, sem erro
+                                     (o inicio automatico do Termux roda a cada 6 h)
+  memoria rotina                    que apps o Rafael abre e a que horas (historico de 60 dias; so neste celular)
+  memoria status                    quantos topicos, trechos e quando foi a ultima atualizacao
+  memoria arquivos                  indexa o TEXTO de todos os arquivos dos projetos do cartao (o buscar acha trechos deles)
+  memoria cartao ligar|desligar|status   memoria no cartao SD (a interna fica de reserva; cartao fora = usa a reserva)
+
+Pasta: ~/kit/memoria, ou o cartao SD com `memoria cartao ligar` (topicos/*.md, indice.db, lixeira/). Topicos que comecam com "pc-" vem do PC e sao trocados a cada
+`atualizar --pc`; os outros sao do celular e do que o Qwen aprendeu, e nunca sao apagados pelo atualizar.
+"""
+import datetime
+import json
+import os
+import pathlib
+import re
+import sqlite3
+import subprocess
+import sys
+import urllib.request
+
+LOCAL = pathlib.Path.home() / "kit" / "memoria"
+CFG_CARTAO = pathlib.Path.home() / "kit" / "memoria-no-cartao"  # guarda o caminho da memoria no cartao SD
+
+
+def escolhe_base():
+    """MEMORIA_DIR (testes) > cartao SD (se ligado e presente) > ~/kit/memoria. Cartao fora: usa a reserva interna."""
+    if os.environ.get("MEMORIA_DIR"):
+        return pathlib.Path(os.environ["MEMORIA_DIR"]), False
+    try:
+        alvo = pathlib.Path(CFG_CARTAO.read_text(encoding="utf-8").strip())
+    except OSError:
+        return LOCAL, False
+    if alvo.is_dir() and os.access(alvo, os.W_OK):
+        return alvo, True
+    return LOCAL, False
+
+
+BASE, NO_CARTAO = escolhe_base()
+TOPICOS = BASE / "topicos"
+LIXEIRA = BASE / "lixeira"
+INDICE = BASE / "indice.db"
+PC_IP = os.environ.get("IA_PC_IP", "100.64.0.1")
+PONTE = os.environ.get("PONTE_URL", f"http://{PC_IP}:20130")
+MAX_FATO = 2000
+MAX_APRENDIDO = int(os.environ.get("MEMORIA_MAX_APRENDIDO", "300"))  # fatos aprendidos por topico
+MAX_TOPICO_PC = 400_000
+RE_TOPICO = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
+# O que NUNCA entra na memoria: o texto sai para os modelos de nuvem quando o Qwen le a memoria.
+PROIBIDO = [
+    (re.compile(r"(?i)\b(senha|password|passwd|pin|token|api[_-]?key|secret|bearer)\b\s*[:=]?\s*\S{6,}"), "senha, chave ou token"),
+    (re.compile(r"(?i)\b(senha|password|passwd|pin)\b.{0,40}?(?=\S*\d)\S{4,}"), "senha"),
+    (re.compile(r"\b(sk-|sk-or-|nvapi-|gsk_|hf_|ghp_|github_pat_|tskey-|AIza|AQ\.)[A-Za-z0-9_\-.]{12,}"), "chave de provedor"),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "chave privada"),
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "e-mail"),
+    (re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"), "CPF"),
+    (re.compile(r"(?i)\bmapao\b|\bmapão\b|\bboletim\b|\bnotas? d[oa]s? alun|\bRA\s*[:=]?\s*\d{6,}"), "dado de aluno"),
+]
+
+
+def recusa_chave(texto):
+    """So chave de verdade (provedor ou chave privada): documento que so CITA a palavra senha ou token passa."""
+    return any(regra.search(texto) for regra, nome in PROIBIDO if nome in ("chave de provedor", "chave privada"))
+
+
+def erro(msg, codigo=2):
+    print(msg, file=sys.stderr)
+    sys.exit(codigo)
+
+
+def recusa(texto):
+    for regra, nome in PROIBIDO:
+        if regra.search(texto):
+            return nome
+    return None
+
+
+def prepara():
+    TOPICOS.mkdir(parents=True, exist_ok=True)
+    LIXEIRA.mkdir(exist_ok=True)
+    try:
+        os.chmod(BASE, 0o700)
+    except OSError:
+        pass
+
+
+def topico_ok(nome):
+    if not RE_TOPICO.match(nome or ""):
+        erro("Topico invalido: use letras minusculas, numeros e hifen (ex.: aparelho, wifi, arena).")
+    return nome
+
+
+# ------------------------------------------------------------------ indice de busca (SQLite FTS5; sem ele, busca simples)
+def trechos(texto):
+    """Quebra em trechos por titulo e paragrafo (~900 caracteres), para a busca devolver so o pedaco util."""
+    titulo, buf, saida = "", [], []
+
+    def fecha():
+        corpo = "\n".join(buf).strip()
+        if corpo:
+            saida.append((titulo, corpo))
+        buf.clear()
+
+    for linha in texto.splitlines():
+        if linha.startswith("#"):
+            fecha()
+            titulo = linha.lstrip("#").strip()[:120]
+            continue
+        buf.append(linha)
+        if sum(len(x) for x in buf) > 900 and not linha.strip():
+            fecha()
+    fecha()
+    return saida
+
+
+def abre_indice():
+    con = sqlite3.connect(INDICE, timeout=120)  # a indexacao do cartao e o atualizar podem rodar juntos: espera a vez
+    try:
+        con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS t USING fts5(topico, titulo, corpo, tokenize='unicode61 remove_diacritics 2')")
+        fts = True
+    except sqlite3.OperationalError:
+        con.execute("CREATE TABLE IF NOT EXISTS t (topico TEXT, titulo TEXT, corpo TEXT)")
+        fts = False
+    return con, fts
+
+
+def reindexa(nomes=None):
+    con, _ = abre_indice()
+    with con:
+        alvos = nomes if nomes is not None else [p.stem for p in TOPICOS.glob("*.md")]
+        if nomes is None:
+            con.execute("DELETE FROM t")
+        for nome in alvos:
+            con.execute("DELETE FROM t WHERE topico = ?", (nome,))
+            arq = TOPICOS / f"{nome}.md"
+            if arq.exists():
+                con.executemany("INSERT INTO t (topico, titulo, corpo) VALUES (?, ?, ?)",
+                                [(nome, ti, co) for ti, co in trechos(arq.read_text(encoding="utf-8", errors="replace"))])
+    con.close()
+
+
+def buscar(texto, n=8):
+    if not INDICE.exists():
+        reindexa()
+    con, fts = abre_indice()
+    palavras = re.findall(r"\w{2,}", texto.lower())
+    if not palavras:
+        erro("Diga o que procurar: memoria buscar wifi")
+    linhas = []
+    if fts:
+        consulta = " OR ".join(f'"{p}"' for p in palavras)
+        try:
+            linhas = con.execute("SELECT topico, titulo, snippet(t, 2, '[', ']', ' ... ', 24) FROM t WHERE t MATCH ? ORDER BY rank LIMIT ?",
+                                 (consulta, n)).fetchall()
+        except sqlite3.OperationalError:
+            linhas = []
+    if not linhas:
+        todas = con.execute("SELECT topico, titulo, corpo FROM t").fetchall()
+        pontua = sorted(((sum(c.lower().count(p) + ti.lower().count(p) * 3 for p in palavras), to, ti, c) for to, ti, c in todas), reverse=True)
+        linhas = [(to, ti, c[:300].replace("\n", " ")) for s, to, ti, c in pontua[:n] if s > 0]
+    con.close()
+    arquivos = busca_arquivos(texto, 5)
+    if not linhas and not arquivos:
+        print(f"Nada sobre \"{texto}\" na memoria. Se descobrir, guarde: memoria lembrar TOPICO \"o que aprendeu\"")
+        return
+    for to, ti, sn in linhas:
+        print(f"- {to}" + (f" > {ti}" if ti else "") + f": {' '.join(sn.split())}")
+    if linhas:
+        print("(para ler inteiro: memoria ler TOPICO)")
+    if arquivos:
+        print("Nos arquivos dos projetos do cartao:")
+        for cam, ti, sn in arquivos:
+            print(f"- {cam} > {ti}: {' '.join(sn.split())}")
+
+
+# ------------------------------------------------------------------ guardar o que aprendeu
+def lembrar(nome, fato):
+    topico_ok(nome)
+    fato = " ".join(fato.split())
+    if not fato:
+        erro("Diga o fato: memoria lembrar wifi \"o reinicio do Wi-Fi leva 10 s\"")
+    if nome.startswith("pc-"):
+        erro("Topicos pc-* vem do PC e sao trocados no atualizar: guarde em outro nome (ex.: o mesmo sem pc-).")
+    if len(fato) > MAX_FATO:
+        erro(f"Fato longo demais ({len(fato)} caracteres; maximo {MAX_FATO}). Resuma.")
+    motivo = recusa(fato)
+    if motivo:
+        erro(f"Recusado: parece conter {motivo}. A memoria vai aos modelos de nuvem; guarde sem isso.")
+    prepara()
+    arq = TOPICOS / f"{nome}.md"
+    texto = arq.read_text(encoding="utf-8") if arq.exists() else f"# {nome}\n"
+    if fato in texto:
+        print(f"Ja estava guardado em {nome}.")
+        return
+    if "\n## Aprendido\n" not in texto:
+        texto = texto.rstrip("\n") + "\n\n## Aprendido\n"
+    texto = texto.rstrip("\n") + f"\n- {datetime.date.today().isoformat()}: {fato}\n"
+    cab, sep, apr = texto.partition("\n## Aprendido\n")
+    linhas = apr.splitlines()
+    if len(linhas) > MAX_APRENDIDO:  # cresce sem pesar: os fatos mais antigos vao para a lixeira (nada se apaga)
+        with (LIXEIRA / f"{nome}.md").open("a", encoding="utf-8") as f:
+            f.write("\n".join(linhas[:-MAX_APRENDIDO]) + "\n")
+        texto = cab + sep + "\n".join(linhas[-MAX_APRENDIDO:]) + "\n"
+    arq.write_text(texto, encoding="utf-8")
+    reindexa([nome])
+    print(f"Guardado em {nome}.")
+
+
+def esquecer(nome, trecho):
+    topico_ok(nome)
+    arq = TOPICOS / f"{nome}.md"
+    if not arq.exists() or not trecho.strip():
+        erro("Topico ou trecho nao encontrado.")
+    texto = arq.read_text(encoding="utf-8")
+    cab, sep, apr = texto.partition("\n## Aprendido\n")
+    if not sep:
+        erro("Esse topico nao tem nada aprendido; o resto vem do celular ou do PC e se refaz no atualizar.")
+    fica, sai = [], []
+    for linha in apr.splitlines():
+        (sai if trecho.lower() in linha.lower() else fica).append(linha)
+    if not sai:
+        erro("Nenhuma linha aprendida com esse trecho.")
+    with (LIXEIRA / f"{nome}.md").open("a", encoding="utf-8") as f:
+        f.write("\n".join(sai) + "\n")
+    arq.write_text(cab + sep + "\n".join(fica).strip("\n") + "\n", encoding="utf-8")
+    reindexa([nome])
+    print(f"{len(sai)} linha(s) foram para a lixeira ({LIXEIRA / (nome + '.md')}).")
+
+
+# ------------------------------------------------------------------ atualizar a partir do proprio celular e do PC
+def roda(cmd, limite=20):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=limite)
+        return p.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def grava_gerado(nome, titulo, corpo):
+    """Topico gerado: refaz a parte de cima e mantem o que o Qwen aprendeu nele."""
+    arq = TOPICOS / f"{nome}.md"
+    aprendido = ""
+    if arq.exists():
+        _, sep, apr = arq.read_text(encoding="utf-8").partition("\n## Aprendido\n")
+        aprendido = (sep + apr) if sep else ""
+    arq.write_text(f"# {titulo}\n(gerado em {datetime.datetime.now():%Y-%m-%d %H:%M} por `memoria atualizar`)\n\n{corpo.strip()}\n{aprendido}",
+                   encoding="utf-8")
+
+
+def atualiza_celular():
+    props = {k: roda(["getprop", k]) for k in ("ro.product.model", "ro.product.marketname", "ro.build.version.release",
+                                               "ro.build.version.sdk", "ro.build.display.id", "ro.hardware", "ro.board.platform",
+                                               "ro.product.cpu.abi", "persist.sys.timezone", "ro.build.version.security_patch")}
+    mem = {}
+    try:
+        for linha in pathlib.Path("/proc/meminfo").read_text().splitlines()[:6]:
+            k, v = linha.split(":", 1)
+            mem[k] = v.strip()
+    except OSError:
+        pass
+    nucleos = os.cpu_count()
+    disco = roda(["df", "-h", "/data", str(pathlib.Path.home())])
+    corpo = ["## Aparelho (getprop)"] + [f"- {k}: {v}" for k, v in props.items() if v]
+    corpo += ["", "## Memoria e CPU", f"- nucleos: {nucleos}"] + [f"- {k}: {v}" for k, v in mem.items()]
+    corpo += ["", "## Espaco", "```", disco, "```"]
+    grava_gerado("aparelho", "Aparelho: Samsung Galaxy A12 (SM-A125M)", "\n".join(corpo))
+    pacotes = roda(["cel", "apps"], 60) or roda(["pm", "list", "packages", "-3"], 60)
+    lista = sorted({l.split(":", 1)[-1].strip() for l in pacotes.splitlines() if l.strip()})
+    grava_gerado("apps", "Apps instalados no celular", f"{len(lista)} pacotes (usuario; para abrir: cel abrir-app PACOTE)\n\n" +
+                 "\n".join(f"- {p}" for p in lista))
+    kit = sorted(p.name for p in (pathlib.Path.home() / "bin").glob("*") if p.is_file())
+    grava_gerado("comandos", "Comandos do Termux (~/bin)", "\n".join(f"- {c}" for c in kit) +
+                 "\n\nAjuda de cada um: COMANDO ajuda (ou --help). Tudo o que o kit faz: o Catalogo do ~/.qwen/QWEN.md.")
+    return ["aparelho", "apps", "comandos"] + atualiza_cartao()
+
+
+RAIZES_CARTAO = os.environ.get("MEMORIA_CARTAO", "/storage")
+
+
+def volumes():
+    """Cartoes montados (/storage/XXXX-XXXX). O Android nao deixa app LISTAR /storage (Permission denied, medido em 05/11):
+    os nomes vem de /proc/mounts; nos testes (MEMORIA_CARTAO), da propria pasta."""
+    raiz = pathlib.Path(RAIZES_CARTAO)
+    achados = set()
+    if RAIZES_CARTAO == "/storage":
+        try:
+            for linha in pathlib.Path("/proc/mounts").read_text().splitlines():
+                m = re.search(r" (/storage/[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}) ", linha)
+                if m:
+                    achados.add(pathlib.Path(m.group(1)))
+        except OSError:
+            pass
+    try:
+        achados |= {p for p in raiz.iterdir() if p.is_dir()}
+    except OSError:
+        pass
+    return sorted(v for v in achados if v.name not in ("emulated", "self"))
+
+
+def atualiza_cartao():
+    """Projetos que o Rafael pos no cartao SD (pasta Projetos): os LEIA-ME viram topicos sd-*, que valem sem internet."""
+    feitos, vistos = [], set()
+    candidatos = []
+    for v in volumes():
+        try:
+            candidatos += sorted(list(v.glob("Projetos/*/*.md")) + list(v.glob("Projetos/*/*/*.md")))
+        except OSError:
+            pass
+    for arq in candidatos:
+        if len(feitos) >= 40 or not re.match(r"(?i)(readme|leia-?me)", arq.name):
+            continue
+        partes = arq.parts[arq.parts.index("Projetos") + 1:-1]
+        if any(re.search(r"(?i)aluno|mapao|notas|backup|node_modules|\.git", p) for p in partes):
+            continue
+        nome = "sd-" + re.sub(r"[^a-z0-9]+", "-", "-".join(partes).lower()).strip("-")[:50]
+        try:
+            texto = arq.read_text(encoding="utf-8", errors="replace")[:60_000]
+        except OSError:
+            continue
+        if not RE_TOPICO.match(nome) or nome in vistos or recusa_chave(texto):
+            continue
+        texto = "\n".join(l for l in texto.splitlines() if recusa(l) not in ("e-mail", "CPF", "dado de aluno"))
+        vistos.add(nome)
+        (TOPICOS / f"{nome}.md").write_text(f"# Projeto do cartao: {'/'.join(partes)}\n\n{texto}\n", encoding="utf-8")
+        feitos.append(nome)
+    return feitos
+
+
+# ------------------------------------------------------------------ todos os textos dos projetos do cartao, no indice (sem internet)
+EXT_TEXTO = {".md", ".txt", ".py", ".sh", ".ps1", ".cmd", ".bat", ".js", ".ts", ".html", ".css", ".java", ".kt", ".c", ".h",
+             ".cpp", ".json", ".yml", ".yaml", ".toml", ".ini", ".xml", ".sql", ".rst", ".gd", ".lua"}
+PULA_PASTA = re.compile(r"(?i)aluno|mapao|notas|backup|node_modules|__pycache__|^\.|^venv$|^build$|^dist$|^target$|^bin$|^obj$|"
+                        r"^python\d*$|^lib$|^libs$|^site-packages$|^doc$|^include$|^share$|^vendor$|^third_party$|^tcl$|^dlls$")
+MAX_ARQ = int(os.environ.get("MEMORIA_MAX_ARQUIVOS", "6000"))
+MAX_TAM_ARQ = 300_000
+
+
+def raizes_projetos():
+    return [v / "Projetos" for v in volumes() if (v / "Projetos").is_dir()]
+
+
+def pedacos_arquivo(texto, sufixo):
+    """Markdown por titulo; o resto em blocos de ~40 linhas (codigo, configuracao)."""
+    if sufixo in (".md", ".rst", ".txt"):
+        return trechos(texto)
+    linhas, saida = texto.splitlines(), []
+    for i in range(0, len(linhas), 40):
+        bloco = "\n".join(linhas[i:i + 40]).strip()
+        if bloco:
+            saida.append((f"linhas {i + 1}-{min(i + 40, len(linhas))}", bloco))
+    return saida
+
+
+def atualiza_arquivos():
+    """Indexa (so o texto) os arquivos dos projetos do cartao: o Matrix acha qualquer trecho deles sem internet.
+    Incremental pela data do arquivo; pula pasta de aluno, MAPAO, notas e backup; tira linha com e-mail, CPF ou dado de
+    aluno; arquivo com chave de verdade fica de fora. Devolve (indexados agora, total)."""
+    con, fts = abre_indice()
+    if not fts:
+        con.close()
+        return 0, 0
+    con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS arq USING fts5(caminho, titulo, corpo, tokenize='unicode61 remove_diacritics 2')")
+    con.execute("CREATE TABLE IF NOT EXISTS arq_meta (caminho TEXT PRIMARY KEY, mtime REAL)")
+    vistos, novos = set(), 0
+    meta = dict(con.execute("SELECT caminho, mtime FROM arq_meta"))
+    for raiz in raizes_projetos():
+        for pasta, subpastas, arquivos in os.walk(raiz):
+            prof = len(pathlib.Path(pasta).relative_to(raiz).parts)
+            subpastas[:] = [] if prof >= 8 else sorted(s for s in subpastas if not PULA_PASTA.search(s))
+            for nome in sorted(arquivos):
+                if len(vistos) >= MAX_ARQ:
+                    break
+                p = pathlib.Path(pasta) / nome
+                if p.suffix.lower() not in EXT_TEXTO or re.search(r"(?i)aluno|mapao", nome):
+                    continue
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                if st.st_size > MAX_TAM_ARQ:
+                    continue
+                cam = str(p)
+                vistos.add(cam)
+                if meta.get(cam) == st.st_mtime:
+                    continue
+                try:
+                    texto = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                con.execute("DELETE FROM arq WHERE caminho = ?", (cam,))
+                if not recusa_chave(texto):
+                    texto = "\n".join(l for l in texto.splitlines() if recusa(l) not in ("e-mail", "CPF", "dado de aluno"))
+                    con.executemany("INSERT INTO arq (caminho, titulo, corpo) VALUES (?, ?, ?)",
+                                    [(cam, ti, co) for ti, co in pedacos_arquivo(texto, p.suffix.lower())])
+                con.execute("INSERT OR REPLACE INTO arq_meta VALUES (?, ?)", (cam, st.st_mtime))
+                novos += 1
+                if novos % 25 == 0:
+                    con.commit()
+    for cam in set(meta) - vistos:  # arquivo que sumiu do cartao sai do indice
+        con.execute("DELETE FROM arq WHERE caminho = ?", (cam,))
+        con.execute("DELETE FROM arq_meta WHERE caminho = ?", (cam,))
+    con.commit()
+    total = con.execute("SELECT count(*) FROM arq_meta").fetchone()[0]
+    con.close()
+    return novos, total
+
+
+def busca_arquivos(texto, n=5):
+    if not INDICE.exists():
+        return []
+    con, fts = abre_indice()
+    try:
+        palavras = re.findall(r"\w{2,}", texto.lower())
+        if not fts or not palavras:
+            return []
+        return con.execute("SELECT caminho, titulo, snippet(arq, 2, '[', ']', ' ... ', 20) FROM arq WHERE arq MATCH ? ORDER BY rank LIMIT ?",
+                           (" OR ".join(f'"{p}"' for p in palavras), n)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
+
+
+# ------------------------------------------------------------------ memoria no cartao SD (pedido do Rafael, 05/11), com reserva interna
+def pasta_cartao():
+    for v in volumes():
+        d = v / "Android" / "data" / "com.termux" / "files"
+        if d.is_dir() and os.access(d, os.W_OK):
+            return d / "matrix-memoria"
+    return None
+
+
+def copia(origem, destino, so_texto=False):
+    """Copia a arvore conferindo o tamanho de cada arquivo; devolve quantos. O cartao (exFAT) nao guarda permissao: so o conteudo."""
+    import shutil
+    n = 0
+    for f in origem.rglob("*"):
+        if not f.is_file() or (so_texto and f.suffix not in (".md", ".json")):
+            continue
+        alvo = destino / f.relative_to(origem)
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if alvo.exists() and alvo.stat().st_size == f.stat().st_size and alvo.stat().st_mtime >= f.stat().st_mtime:
+                continue
+        except OSError:
+            pass
+        shutil.copyfile(f, alvo)
+        if alvo.stat().st_size != f.stat().st_size:
+            erro(f"Copia conferida FALHOU em {alvo}: nada foi trocado.")
+        n += 1
+    return n
+
+
+def espelha_reserva():
+    """Com a memoria no cartao, a interna fica de reserva (topicos e rotina; o indice se refaz): vale se o cartao sair."""
+    if NO_CARTAO and BASE != LOCAL:
+        try:
+            copia(BASE, LOCAL, so_texto=True)
+        except (OSError, SystemExit):
+            pass
+
+
+def cartao(acao, pasta=None):
+    if acao == "status":
+        print("Memoria: " + ("NO CARTAO SD" if NO_CARTAO else "na memoria interna") + f" ({BASE}).")
+        if CFG_CARTAO.exists() and not NO_CARTAO:
+            print("AVISO: a memoria foi posta no cartao, mas ele nao esta acessivel agora: usando a reserva interna.")
+        return
+    if acao == "ligar":
+        alvo = pathlib.Path(pasta) if pasta else pasta_cartao()
+        if not alvo:
+            erro("Nao achei o cartao SD gravavel (Android/data/com.termux/files no cartao).")
+        alvo.mkdir(parents=True, exist_ok=True)
+        n = copia(LOCAL, alvo)
+        CFG_CARTAO.write_text(str(alvo) + "\n", encoding="utf-8")
+        print(f"Memoria no cartao: {alvo} ({n} arquivos copiados e conferidos). A interna fica de reserva.")
+        print("Cuidado: o Android apaga essa pasta do cartao se o Termux for desinstalado (a reserva interna tambem some).")
+        return
+    if acao == "desligar":
+        if NO_CARTAO:
+            n = copia(BASE, LOCAL)
+            print(f"{n} arquivos trazidos do cartao para a memoria interna.")
+        if CFG_CARTAO.exists():
+            CFG_CARTAO.unlink()
+        print("Memoria de volta na memoria interna (a copia do cartao ficou la, sem uso).")
+        return
+    erro("Use: memoria cartao ligar|desligar|status")
+
+
+# ------------------------------------------------------------------ rotina: que app, a que horas (so do proprio aparelho)
+PERIODOS = (("madrugada", 0, 6), ("manha", 6, 12), ("tarde", 12, 18), ("noite", 18, 24))
+FORA_DA_ROTINA = re.compile(r"^(com\.sec\.android\.app\.launcher|com\.android\.systemui|com\.android\.permissioncontroller|"
+                            r"com\.google\.android\.permissioncontroller|com\.samsung\.android\.app\.aodservice|android)$")
+RE_EVENTO = re.compile(r'time="(\d{4}-\d\d-\d\d) (\d\d):(\d\d):\d\d" type=ACTIVITY_RESUMED package=([\w.]+)')
+
+
+def rotina(texto_eventos=None):
+    """Junta os eventos de abrir app do Android (dumpsys usagestats, que guarda poucos dias) num historico de ate 60 dias
+    em rotina.json, e escreve o topico `rotina`: apps por periodo do dia, hora do primeiro e do ultimo uso."""
+    if texto_eventos is None:
+        texto_eventos = roda(["cel", "sh", "dumpsys usagestats | grep type=ACTIVITY_RESUMED"], 120)
+    eventos = [m.groups() for m in RE_EVENTO.finditer(texto_eventos or "") if not FORA_DA_ROTINA.match(m.group(4))]
+    if not eventos:
+        return []
+    estado_arq = BASE / "rotina.json"
+    try:
+        hist = json.loads(estado_arq.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        hist = {}
+    por_dia = {}
+    for dia, hh, mm, pkg in eventos:
+        d = por_dia.setdefault(dia, {"primeiro": "99:99", "ultimo": "00:00", "apps": {}})
+        hora = f"{hh}:{mm}"
+        d["primeiro"], d["ultimo"] = min(d["primeiro"], hora), max(d["ultimo"], hora)
+        per = next(n for n, a, b in PERIODOS if a <= int(hh) < b)
+        d["apps"].setdefault(per, {}).setdefault(pkg, 0)
+        d["apps"][per][pkg] += 1
+    hist.update(por_dia)
+    for velho in sorted(hist)[:-60]:
+        del hist[velho]
+    estado_arq.write_text(json.dumps(hist, ensure_ascii=False, indent=0), encoding="utf-8")
+    soma = {}
+    for d in hist.values():
+        for per, apps in d["apps"].items():
+            for pkg, n in apps.items():
+                soma.setdefault(per, {}).setdefault(pkg, 0)
+                soma[per][pkg] += n
+    linhas = [f"Base: {len(hist)} dia(s) de uso (de {min(hist)} a {max(hist)}); o Android guarda poucos dias, o historico fica aqui.", "",
+              "## Apps mais abertos por periodo (todas as datas)"]
+    for per, _, _ in PERIODOS:
+        top = sorted(soma.get(per, {}).items(), key=lambda x: -x[1])[:6]
+        if top:
+            linhas.append(f"- {per}: " + ", ".join(f"{p} ({n})" for p, n in top))
+    linhas += ["", "## Dia a dia (primeiro e ultimo uso; 3 apps mais abertos)"]
+    for dia in sorted(hist, reverse=True)[:30]:
+        d = hist[dia]
+        tot = {}
+        for apps in d["apps"].values():
+            for p, n in apps.items():
+                tot[p] = tot.get(p, 0) + n
+        top = ", ".join(p for p, _ in sorted(tot.items(), key=lambda x: -x[1])[:3])
+        linhas.append(f"- {dia}: {d['primeiro']} a {d['ultimo']}; {top}")
+    grava_gerado("rotina", "Rotina do Rafael no celular (apps e horarios)", "\n".join(linhas))
+    return ["rotina"]
+
+
+def token():
+    try:
+        for linha in (pathlib.Path.home() / ".qwen" / ".env").read_text().splitlines():
+            if linha.startswith("PONTE_PC_TOKEN="):
+                return linha.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def atualiza_pc():
+    tk = token()
+    if not tk:
+        erro("Sem PONTE_PC_TOKEN em ~/.qwen/.env: o celular nao esta pareado com a ponte do PC.")
+    req = urllib.request.Request(f"{PONTE}/v1/memoria/pacote", headers={"Authorization": f"Bearer {tk}"})
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            dados = json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # PC desligado, Tailscale fora, ponte antiga
+        erro(f"O PC nao respondeu ({type(e).__name__}). Fica a memoria que ja existe; tente de novo com o PC ligado.", 3)
+    novos = {}
+    for nome, texto in (dados.get("arquivos") or {}).items():
+        base = nome[:-3] if nome.endswith(".md") else nome
+        if not base.startswith("pc-") or not RE_TOPICO.match(base) or not isinstance(texto, str) or len(texto) > MAX_TOPICO_PC:
+            continue
+        if recusa_chave(texto):  # o PC ja filtrou; aqui so chave de verdade
+            continue
+        novos[base] = texto
+    if not novos:
+        erro("O PC respondeu sem documentos: nada mudou.", 3)
+    for velho in TOPICOS.glob("pc-*.md"):
+        if velho.stem not in novos:
+            velho.replace(LIXEIRA / velho.name)
+    for base, texto in novos.items():
+        (TOPICOS / f"{base}.md").write_text(texto, encoding="utf-8")
+    return list(novos)
+
+
+def status():
+    prepara()
+    tops = sorted(TOPICOS.glob("*.md"))
+    con, fts = abre_indice()
+    n = con.execute("SELECT count(*) FROM t").fetchone()[0]
+    con.close()
+    pc = [p for p in tops if p.stem.startswith("pc-")]
+    print(f"Memoria do Matrix: {len(tops)} topicos ({len(pc)} do PC), {n} trechos no indice ({'busca completa' if fts else 'busca simples'}).")
+    try:
+        con, _ = abre_indice()
+        na = con.execute("SELECT count(*) FROM arq_meta").fetchone()[0]
+        con.close()
+        print(f"Arquivos dos projetos do cartao no indice: {na}.")
+    except sqlite3.OperationalError:
+        pass
+    print("Onde: " + ("cartao SD (reserva na memoria interna)" if NO_CARTAO else "memoria interna"))
+    if tops:
+        ultima = max(p.stat().st_mtime for p in tops)
+        print(f"Ultima mudanca: {datetime.datetime.fromtimestamp(ultima):%Y-%m-%d %H:%M}. Pasta: {BASE}")
+
+
+def main(args):
+    if not args or args[0] in ("-h", "--help", "ajuda"):
+        print(__doc__.strip())
+        return
+    cmd, resto = args[0], args[1:]
+    prepara()
+    if CFG_CARTAO.exists() and not NO_CARTAO and not os.environ.get("MEMORIA_DIR"):
+        # memoria ligada no cartao, mas o cartao nao esta aqui: a reserva interna tem os textos; refaz o indice dela
+        try:
+            velho = INDICE.stat().st_mtime
+        except OSError:
+            velho = 0
+        if any(p.stat().st_mtime > velho for p in TOPICOS.glob("*.md")):
+            reindexa()
+    if cmd == "buscar":
+        n = 8
+        if "-n" in resto:
+            i = resto.index("-n")
+            try:
+                n = max(1, min(30, int(resto[i + 1])))
+            except (IndexError, ValueError):
+                erro("Use: memoria buscar TEXTO -n 8")
+            resto = resto[:i] + resto[i + 2:]
+        buscar(" ".join(resto), n)
+    elif cmd == "ler":
+        if not resto:
+            erro("Use: memoria ler TOPICO (memoria topicos lista)")
+        arq = TOPICOS / f"{topico_ok(resto[0])}.md"
+        if not arq.exists():
+            erro(f"Nao existe o topico {resto[0]}. Veja: memoria topicos")
+        linhas = arq.read_text(encoding="utf-8", errors="replace").splitlines()
+        print("\n".join(linhas[:400]) + (f"\n... (+{len(linhas) - 400} linhas; use memoria buscar)" if len(linhas) > 400 else ""))
+    elif cmd == "topicos":
+        for p in sorted(TOPICOS.glob("*.md")):
+            print(f"{p.stem:32} {p.stat().st_size // 1024:5} KB  {datetime.datetime.fromtimestamp(p.stat().st_mtime):%Y-%m-%d %H:%M}")
+    elif cmd == "lembrar":
+        if len(resto) < 2:
+            erro("Use: memoria lembrar TOPICO \"fato\"")
+        lembrar(resto[0], " ".join(resto[1:]))
+    elif cmd == "esquecer":
+        if len(resto) < 2:
+            erro("Use: memoria esquecer TOPICO \"trecho\"")
+        esquecer(resto[0], " ".join(resto[1:]))
+    elif cmd == "atualizar":
+        feitos = atualiza_celular()
+        if "--auto" in resto:  # o inicio automatico (a cada 6 h): tudo o que der, sem erro se o PC ou a depuracao estiverem fora
+            feitos += rotina()
+            try:
+                feitos += atualiza_pc()
+            except SystemExit:
+                pass
+        elif "--pc" in resto:
+            feitos += atualiza_pc()
+        reindexa()
+        novos, total = atualiza_arquivos()
+        print(f"Atualizado: {len(feitos)} topicos ({', '.join(feitos[:8])}{'...' if len(feitos) > 8 else ''}); "
+              f"arquivos do cartao: {total} no indice ({novos} novos ou mudados).")
+    elif cmd == "resumo":  # para o modelo do celular sem internet (cabe em ~1.800 caracteres)
+        partes = []
+        for nome, linhas in (("aparelho", 6), ("rotina", 8), ("comandos", 30)):
+            arq = TOPICOS / f"{nome}.md"
+            if arq.exists():
+                corpo = [l for l in arq.read_text(encoding="utf-8").splitlines()[2:] if l.strip() and not l.startswith("```")]
+                partes.append(f"{nome}: " + "; ".join(l.strip("- ").strip() for l in corpo[:linhas]))
+        aprendidos = []
+        for arq in sorted(TOPICOS.glob("*.md"), key=lambda p: -p.stat().st_mtime):
+            _, sep, apr = arq.read_text(encoding="utf-8").partition("\n## Aprendido\n")
+            if sep:
+                aprendidos += [f"{arq.stem}: {l[2:].strip()}" for l in apr.splitlines() if l.startswith("- ")][-3:]
+        if aprendidos:
+            partes.append("aprendido: " + " | ".join(aprendidos[:12]))
+        print("\n".join(partes)[:1800])
+    elif cmd == "rotina":
+        feitos = rotina()
+        reindexa(feitos)
+        print("Rotina atualizada." if feitos else "Sem eventos de uso (a conexao do cel esta de pe? cel conectar).")
+    elif cmd == "status":
+        status()
+    elif cmd == "reindexar":
+        reindexa()
+        status()
+    elif cmd == "arquivos":  # so o indice dos arquivos dos projetos do cartao
+        novos, total = atualiza_arquivos()
+        print(f"Arquivos dos projetos do cartao: {total} no indice ({novos} novos ou mudados).")
+    elif cmd == "cartao":
+        cartao(resto[0] if resto else "status", resto[1] if len(resto) > 1 else None)
+    else:
+        erro(f"Comando desconhecido: {cmd} (veja: memoria ajuda)")
+    if cmd in ("lembrar", "esquecer", "atualizar", "rotina"):
+        espelha_reserva()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

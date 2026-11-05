@@ -1,0 +1,25 @@
+name: Sugerir uma melhoria
+description: Uma ideia para o projeto.
+title: "[Ideia] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes, confira `memoria/RADAR-DESEMPENHO.md`: muita ideia de desempenho já foi testada, com o resultado. Sem root: ideias que exigem root ficam fora do projeto.
+  - type: textarea
+    id: ideia
+    attributes:
+      label: O que você quer fazer
+    validations:
+      required: true
+  - type: textarea
+    id: porque
+    attributes:
+      label: Por que ajuda (de preferência um caso real)
+    validations:
+      required: true
+  - type: textarea
+    id: como
+    attributes:
+      label: Como imagina que funcione

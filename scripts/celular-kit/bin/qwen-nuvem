@@ -1,0 +1,24 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Qwen Code com os modelos GRATIS da nuvem, pelo OmniRoute do PC (combos codigo, auditoria, rapido), pelo cabo USB.
+# Precisa de duas coisas, e NENHUMA vem ligada de fabrica:
+#  1) a ponte do cabo "adb reverse tcp:20128 tcp:20128" (o Claude Code do PC abre com: pwsh scripts\termux.ps1 -Pontes -OmniRoute);
+#  2) a chave de CLIENTE do OmniRoute em ~/.qwen/.env, linha OMNIROUTE_API_KEY=... (so entra com o "sim" do Rafael no dia; revogavel; fora do git).
+# Uso: qwen-nuvem [pasta-do-projeto] [combo]      combo: codigo (padrao) | auditoria | rapido
+alvo="${1:-$PWD}"
+combo="${2:-codigo}"
+case "$combo" in codigo|auditoria|rapido) ;; *) echo "Combo invalido: $combo (use codigo, auditoria ou rapido)"; exit 1 ;; esac
+[ -d "$alvo" ] || { echo "A pasta nao existe: $alvo"; exit 1; }
+chave=$(grep '^OMNIROUTE_API_KEY=' ~/.qwen/.env 2>/dev/null | head -1 | cut -d= -f2-)
+if [ -z "$chave" ]; then
+  echo "Falta a chave do OmniRoute em ~/.qwen/.env (linha OMNIROUTE_API_KEY=...)."
+  echo "Ela so entra no celular com o \"sim\" do Rafael no dia: peca ao Claude Code do PC. Enquanto isso, use qwen-pc."
+  exit 1
+fi
+if ! printf 'header = "Authorization: Bearer %s"\n' "$chave" | curl -sf -K - -m 8 http://127.0.0.1:20128/v1/models >/dev/null; then   # chave pela entrada padrao, nunca na linha de comando
+  echo "O OmniRoute do PC nao respondeu em 127.0.0.1:20128 (ponte do cabo, OmniRoute aberto no PC ou chave invalida)."
+  echo "Dica: o comando  ia  faz tudo sozinho, inclusive pela Tailscale (sem cabo). Digite:  ia"
+  exit 1
+fi
+export OMNIROUTE_API_KEY="$chave"
+cd "$alvo" || exit 1
+exec qwen --model "$combo"

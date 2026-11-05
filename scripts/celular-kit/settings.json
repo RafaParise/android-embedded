@@ -1,0 +1,95 @@
+{
+  "env": {
+    "OLLAMA_API_KEY": "ollama",
+    "LLAMACPP_API_KEY": "not-needed"
+  },
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "llama3.2-32k",
+        "name": "Llama 3.2 3B (Ollama do PC; fraco, so tarefa curta; executa ferramentas)",
+        "envKey": "OLLAMA_API_KEY",
+        "baseUrl": "http://127.0.0.1:11435/v1",
+        "generationConfig": {
+          "timeout": 900000,
+          "streamIdleTimeoutMs": 1200000,
+          "maxRetries": 1,
+          "contextWindowSize": 32768,
+          "samplingParams": { "temperature": 0.2, "max_tokens": 4096 }
+        }
+      },
+      {
+        "id": "codigo",
+        "name": "OmniRoute combo codigo (nuvem gratis pelo PC; o comando ia liga a ponte 20128 sozinho)",
+        "envKey": "OMNIROUTE_API_KEY",
+        "baseUrl": "http://127.0.0.1:20128/v1",
+        "generationConfig": {
+          "timeout": 600000,
+          "streamIdleTimeoutMs": 600000,
+          "maxRetries": 1,
+          "contextWindowSize": 120000,
+          "samplingParams": { "temperature": 0.2, "max_tokens": 16384 }
+        }
+      },
+      {
+        "id": "auditoria",
+        "name": "OmniRoute combo auditoria (revisar, cacar bug; nuvem gratis pelo PC)",
+        "envKey": "OMNIROUTE_API_KEY",
+        "baseUrl": "http://127.0.0.1:20128/v1",
+        "generationConfig": {
+          "timeout": 600000,
+          "streamIdleTimeoutMs": 600000,
+          "maxRetries": 1,
+          "contextWindowSize": 120000,
+          "samplingParams": { "temperature": 0.2, "max_tokens": 16384 }
+        }
+      },
+      {
+        "id": "rapido",
+        "name": "OmniRoute combo rapido (resumo, commit, tarefa curta; nuvem gratis pelo PC)",
+        "envKey": "OMNIROUTE_API_KEY",
+        "baseUrl": "http://127.0.0.1:20128/v1",
+        "generationConfig": {
+          "timeout": 300000,
+          "streamIdleTimeoutMs": 300000,
+          "maxRetries": 1,
+          "contextWindowSize": 120000,
+          "samplingParams": { "temperature": 0.3, "max_tokens": 8192 }
+        }
+      },
+      {
+        "id": "qwen2.5-coder-32k",
+        "name": "Qwen2.5-Coder 7B (PC; so conversa, NAO executa ferramentas)",
+        "envKey": "OLLAMA_API_KEY",
+        "baseUrl": "http://127.0.0.1:11435/v1",
+        "generationConfig": {
+          "timeout": 900000,
+          "streamIdleTimeoutMs": 1200000,
+          "maxRetries": 1,
+          "contextWindowSize": 32768,
+          "samplingParams": { "temperature": 0.2, "max_tokens": 4096 }
+        }
+      },
+      {
+        "id": "qwen",
+        "name": "Qwen2.5 0,5B (no celular, so conversa curta)",
+        "envKey": "LLAMACPP_API_KEY",
+        "baseUrl": "http://127.0.0.1:8080/v1",
+        "generationConfig": {
+          "timeout": 900000,
+          "streamIdleTimeoutMs": 1200000,
+          "maxRetries": 1,
+          "contextWindowSize": 8192,
+          "samplingParams": { "temperature": 0.3, "max_tokens": 512 }
+        }
+      }
+    ]
+  },
+  "security": { "auth": { "selectedType": "openai" } },
+  "model": { "name": "llama3.2-32k" },
+  "memory": { "enableManagedAutoMemory": false, "enableManagedAutoDream": false },
+  "privacy": { "usageStatisticsEnabled": false },
+  "telemetry": { "enabled": false },
+  "general": { "enableAutoUpdate": false, "outputLanguage": "pt-BR", "batchAutoCollect": false },
+  "ui": { "enableUserFeedback": false }
+}

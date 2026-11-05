@@ -1,0 +1,40 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Linux (Debian) sem interface, como subsistema do Termux. So roda enquanto voce o usa: ao sair, nao sobra processo.
+#   linux                  abre o terminal do Debian
+#   linux -c "comando"     roda um comando e sai
+#   linux status           espaco ocupado e se ha algo rodando
+#   linux remover          apaga o Debian e devolve o espaco (pede confirmacao)
+DISTRO=debian
+RAIZ="$PREFIX/var/lib/proot-distro/containers/$DISTRO"  # proot-distro 5: containers/ no lugar de installed-rootfs/
+
+instalado() { [ -d "$RAIZ" ]; }
+
+case "$1" in
+  status)
+    if instalado; then
+      echo "Debian instalado: $(du -sh "$RAIZ" 2>/dev/null | cut -f1)"
+    else
+      echo "Debian nao instalado. Para instalar: pkg install proot-distro && proot-distro install $DISTRO"
+    fi
+    n=$(pgrep -c proot 2>/dev/null)  # sem nenhum, o pgrep imprime 0 e sai com erro
+    echo "Rodando agora: ${n:-0} processo(s) do Linux"
+    ;;
+  remover)
+    printf 'Apagar o Debian e tudo dentro dele? Digite APAGAR: '
+    read -r r
+    if [ "$r" = APAGAR ]; then proot-distro remove "$DISTRO"; else echo "Nada foi apagado."; fi
+    ;;
+  -c)
+    instalado || { echo "Debian nao instalado."; exit 1; }
+    shift
+    exec proot-distro login "$DISTRO" --shared-tmp -- /bin/bash -lc "$*"
+    ;;
+  "")
+    instalado || { echo "Debian nao instalado. Para instalar: pkg install proot-distro && proot-distro install $DISTRO"; exit 1; }
+    exec proot-distro login "$DISTRO" --shared-tmp
+    ;;
+  *)
+    sed -n '2,6p' "$0" | cut -c3-
+    exit 2
+    ;;
+esac
