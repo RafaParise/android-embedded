@@ -3,7 +3,7 @@
 
   python scripts/segunda-tela.py celular [--leve]             o PC mostra e comanda a tela do celular (scrcpy)
   python scripts/segunda-tela.py extra [--app PACOTE] [--leve] o celular ganha uma TELA EXTRA, que aparece numa janela
-                                                              do PC (scrcpy --new-display; padrao: navegador Fennec)
+                                                              do PC (scrcpy --new-display; padrao: Notas; o Fennec fica PRETO na tela virtual, conferido 05/11)
   python scripts/segunda-tela.py pc                           o celular vira MONITOR EXTRA do Windows (Sunshine no PC +
                                                               Moonlight no celular; instalar uma vez: segunda-tela-instalar.cmd)
   python scripts/segunda-tela.py status                       mostra o que esta pronto
@@ -22,7 +22,20 @@ import subprocess
 import sys
 
 AQUI = pathlib.Path(__file__).resolve().parent
-APP_PADRAO = "org.mozilla.fennec_fdroid"
+APP_PADRAO = "org.fossify.notes"
+# Apps que desenham na tela virtual (conferido 05/11: as Notas sim; o Fennec/GeckoView fica com a janela preta).
+APPS_EXTRA = [("Notas", "org.fossify.notes"), ("Arquivos", "org.fossify.filemanager"), ("Galeria", "org.fossify.gallery"),
+              ("Termux", "com.termux"), ("VLC", "org.videolan.vlc"), ("Agenda", "org.fossify.calendar")]
+
+
+def escolhe_app():
+    for i, (nome, _) in enumerate(APPS_EXTRA, 1):
+        print(" %d  %s" % (i, nome))
+    try:
+        op = input("Qual app abrir na tela extra? [1] ").strip() or "1"
+    except EOFError:
+        op = "1"
+    return APPS_EXTRA[int(op) - 1][1] if op.isdigit() and 1 <= int(op) <= len(APPS_EXTRA) else APP_PADRAO
 PC_IP = "100.64.0.1"
 _executa = subprocess.run  # os testes trocam por um falso
 _inicia = subprocess.Popen
@@ -120,9 +133,10 @@ def pc():
         return 2
     if not rodando:
         _executa(["sc", "start", "SunshineService"], capture_output=True, text=True)
-    print("Sunshine ligado no PC. No celular: abra o Moonlight, toque no PC (ou + e digite " + PC_IP + ") e escolha Desktop.")
-    print("Primeira vez: o Moonlight mostra um PIN; digite-o em https://localhost:47990 > PIN (no PC).")
-    print("Para ESTENDER a area de trabalho (e nao so espelhar): Windows > Configuracoes > Sistema > Tela > Estender estes video.")
+    print("Sunshine ligado no PC. No celular: abra o Moonlight, toque no PC (ou + e digite " + PC_IP + ")")
+    print("e escolha 'Monitor extra (celular)': o PC liga um monitor virtual de 1600x720 a DIREITA da tela e o celular o mostra;")
+    print("arraste janelas para a direita. Ao sair do Moonlight o monitor virtual desliga sozinho (scripts\\monitor-virtual.ps1).")
+    print("'Desktop' no Moonlight = espelhar a tela principal. Primeira vez: o Moonlight mostra um PIN; digite-o em https://localhost:47990/pin.")
     print("Ao terminar: python scripts\\segunda-tela.py pc-parar (o Sunshine fica parado e nao gasta nada).")
     return 0
 
@@ -155,7 +169,7 @@ def menu():
         op = input("Escolha: ").strip()
     except EOFError:
         return 0
-    return {"1": lambda: celular(False), "2": lambda: extra(None, False), "3": pc, "4": lambda: celular(True),
+    return {"1": lambda: celular(False), "2": lambda: extra(escolhe_app(), False), "3": pc, "4": lambda: celular(True),
             "5": pc_parar}.get(op, lambda: 0)()
 
 

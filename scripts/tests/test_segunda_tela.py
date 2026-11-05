@@ -78,7 +78,7 @@ def test_extra_cria_tela_nova_com_app(m):
 
 def test_extra_padrao_abre_o_navegador(m):
     m.main(["extra"])
-    assert "--start-app=org.mozilla.fennec_fdroid" in scrcpys(m)[0]
+    assert "--start-app=org.fossify.notes" in scrcpys(m)[0]  # o Fennec fica preto na tela virtual (05/11)
 
 
 @pytest.mark.parametrize("ruim", ["a;b", "x y", "../z", ""])
@@ -111,3 +111,17 @@ def test_sem_conexao_nao_abre(m):
     m._executa = recusa
     assert m.main(["celular"]) == 1
     assert not scrcpys(m)
+
+
+def test_menu_tela_extra_pergunta_o_app(m, monkeypatch):
+    respostas = iter(["2", "4"])
+    monkeypatch.setattr("builtins.input", lambda *_: next(respostas))
+    chamado = {}
+    monkeypatch.setattr(m, "extra", lambda app, leve: chamado.setdefault("app", app) and 0)
+    m.menu()
+    assert chamado["app"] == "com.termux"
+
+
+def test_escolha_invalida_cai_no_padrao(m, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda *_: "99")
+    assert m.escolhe_app() == m.APP_PADRAO == "org.fossify.notes"
