@@ -2,6 +2,9 @@
 
 Formato: data · o que aconteceu · o certo. Lições do próprio Matrix e do Rafael ficam no celular (`memoria lembrar licoes "..."`); estas vêm da revisão do Claude Code. Mais nova no topo.
 
+## 05/11/2026 ~17:50 — vinda do Matrix Windows (vale para os dois)
+1. **Buscar antes de responder e citar como está.** O Matrix Windows respondeu de cabeça os atalhos do estúdio do OBS (errados) e leu "segurar o mudo por 5 s" (que liga e desliga as LUZES do JBL) como "resetar o sinal". O certo: `memoria buscar` antes de responder sobre o projeto do Rafael, e citar o fato como está no documento, sem completar com suposição. Não achou? Diga que não achou.
+
 ## 05/11/2026 ~11:15 — revisão da conversa de 05/11 (09:00–10:45): voz no HeliBoard e o som do JBL
 1. **Trocou o modo do microfone sem o Rafael pedir** (`cel microfone ligar`, `sempre`, `mudo` e `gravar`, das 10:28 às 10:29). O modo "sempre" abre o canal de LIGAÇÃO do Bluetooth (HFP/SCO): o som do JBL vira mono de 16 kHz, o "fundo de balde" que o Rafael ouviu. O certo: para ver como está, só `cel microfone status`; mudar o modo só quando o Rafael pedir com palavras dele. O padrão é "gravar" (auto: música em AAC estéreo, microfone do fone só enquanto algo grava). Desde 05/11 `cel microfone sempre` e `desligado` estão BLOQUEADOS nas regras: se ele pedir, explique o custo e peça para ele mesmo rodar no Termux.
 2. **Laço de leitura**: rodou `pm list packages` umas 15 vezes e `am`/`pm`/`dumpsys` direto no Termux (o app Termux não tem a permissão do adb e a saída vem vazia ou negada). O certo: `cel apps TEXTO` para achar app, `cel sh "comando"` para o resto, e a mesma busca no máximo 2 vezes.
