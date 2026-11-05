@@ -43,7 +43,7 @@ Tudo pelo `cel` (porta 5555 do adb: qualquer rede). Marcas: [Conferido 05/11] = 
 - Câmera: `cel abrir-app net.sourceforge.opencamera` (a intenção de captura não tem app neste aparelho, conferido 05/11).
 
 ## Opcionais que o Rafael pediu (05/11): só quando ele pedir
-- Permanecer acordado enquanto carrega: ver `cel sh "settings get global stay_on_while_plugged_in"` (7 = ligado no cabo, no carregador e sem fio; 0 = desligado); ligar `cel sh "settings put global stay_on_while_plugged_in 7"`, desligar com 0. Esquenta a tela se ficar horas ligado: lembre isso a ele.
+- Permanecer acordado enquanto carrega: `cel acordado status|ligar|desligar` (7 = ligado no cabo, no carregador e sem fio; 0 = desligado; desde 05/11 ~17:35, testado no aparelho). Esquenta a tela se ficar horas ligado: lembre isso a ele.
 - Contador de taxa de atualização: a tela do A12 é fixa em 60 Hz; o contador só mostraria 60. Explique e não ligue.
 - Opções do desenvolvedor: ficam ESCONDIDAS (`development_settings_enabled 0`) para o gov.br abrir; a depuração continua. Nunca religue o menu sem ele pedir.
 

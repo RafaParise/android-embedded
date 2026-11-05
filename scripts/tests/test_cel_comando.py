@@ -207,6 +207,18 @@ def test_economia_de_dados_usa_o_netpolicy(cel):
     assert cel.roda("economia-dados", "comprimir")[0] == 2
 
 
+def test_acordado_liga_e_desliga_o_permanecer_acordado(cel):
+    _conectado(cel)
+    assert cel.roda("acordado", "ligar")[0] == 0
+    assert cel.roda("acordado", "desligar")[0] == 0
+    assert cel.roda("acordado", "status")[0] == 0
+    reg = cel.registro()
+    assert "settings put global stay_on_while_plugged_in 7" in reg
+    assert "settings put global stay_on_while_plugged_in 0" in reg
+    assert "settings get global stay_on_while_plugged_in" in reg
+    assert cel.roda("acordado", "sempre")[0] == 2
+
+
 def test_tela_apagar_usa_os_botoes_da_vigia_e_confere_a_camada(cel):
     _conectado(cel)
     rc, s = cel.roda("tela", "apagar")

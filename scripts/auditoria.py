@@ -37,8 +37,9 @@ FOSS = ["helium314.keyboard", "org.fossify.messages", "org.fossify.clock", "org.
         "org.fossify.gallery", "org.fossify.filemanager", "org.fossify.math", "org.mozilla.fennec_fdroid",
         "net.thunderbird.android", "org.schabi.newpipe", "org.videolan.vlc", "com.junkfood.seal", "app.organicmaps",
         "net.sourceforge.opencamera", "com.gitlab.mudlej.MjPdfReader", "com.google.android.diskusage", "org.fdroid.fdroid",
-        "org.kde.kdeconnect_tp", "com.freerdp.afreerdp", "com.termux", "info.dvkr.screenstream", "com.mattgmg.miracastwidget",
+        "org.kde.kdeconnect_tp", "com.freerdp.afreerdp", "com.termux", "info.dvkr.screenstream",
         "org.fossify.contacts", "org.fossify.phone", "org.documentfoundation.libreoffice"]  # FeedTV: o Rafael desinstalou em 30/10
+# com.mattgmg.miracastwidget: DESATIVADO a pedido do Rafael em 05/11 (o A12 nao tem Smart View; a TV e pelo ScreenStream)
 PAPEIS = {"android.app.role.SMS": "org.fossify.messages", "android.app.role.BROWSER": "org.mozilla.fennec_fdroid",
           "android.app.role.HOME": "com.sec.android.app.launcher", "android.app.role.DIALER": "org.fossify.phone"}
 IME = "helium314.keyboard/.latin.LatinIME"
