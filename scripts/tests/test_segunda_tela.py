@@ -14,7 +14,7 @@ class R:
 
 
 @pytest.fixture
-def m():
+def m(tmp_path):
     spec = importlib.util.spec_from_file_location("segunda_tela", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -34,6 +34,8 @@ def m():
         if cmd[:2] == ["adb", "disconnect"]:
             e["tcp"] = False
             return R(0, "")
+        if cmd[-2:] == ["wm", "size"]:
+            return R(0, "Physical size: 720x1600")
         if cmd[:2] == ["sc", "query"]:
             if e["sunshine"] is None:
                 return R(1060, "nao existe")
@@ -42,6 +44,10 @@ def m():
     mod._executa = falso
     mod.scrcpy = lambda: "scrcpy.exe"
     mod.tamanho_monitor = lambda: (1440, 900)
+    mod.MARCA = tmp_path / "preencher.marca"
+    mod.monitores = lambda: [
+        {"nome": "DISPLAY1", "x": 0, "y": 0, "w": 1440, "h": 900, "principal": True, "tv": False, "virtual": False},
+        {"nome": "DISPLAY8", "x": 1440, "y": 0, "w": 1920, "h": 1080, "principal": False, "tv": True, "virtual": False}]
     return mod
 
 
@@ -125,3 +131,83 @@ def test_menu_tela_extra_pergunta_o_app(m, monkeypatch):
 def test_escolha_invalida_cai_no_padrao(m, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *_: "99")
     assert m.escolhe_app() == m.APP_PADRAO == "org.fossify.notes"
+
+
+def wms(m):
+    return [c[4:] for c in m.estado["chamadas"] if c[:1] == ["adb"] and c[3:5] == ["shell", "wm"]]
+
+
+def test_forma_para_16x9_e_16x10():
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("st", SCRIPT)
+    mod = iu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.forma_para((720, 1600), 1920, 1080) == (720, 1280)
+    assert mod.forma_para((720, 1600), 1440, 900) == (720, 1152)
+    assert mod.forma_para((720, 1600), 1080, 1920) == (720, 1280)  # monitor em pe: mesma proporcao
+    assert mod.forma_para((720, 1600), 3440, 1440) is None  # monitor mais comprido que o celular: nada a mudar
+    assert mod.forma_para(None, 1920, 1080) is None
+
+
+def test_alvo_e_a_tv_e_nunca_o_virtual(m):
+    tv = {"nome": "TV", "x": 9, "y": 0, "w": 1920, "h": 1080, "principal": False, "tv": True, "virtual": False}
+    vir = {"nome": "V", "x": 0, "y": 0, "w": 1600, "h": 720, "principal": True, "tv": False, "virtual": True}
+    pri = {"nome": "P", "x": 0, "y": 0, "w": 1440, "h": 900, "principal": True, "tv": False, "virtual": False}
+    assert m.monitor_alvo([pri, vir, tv])["nome"] == "TV"
+    assert m.monitor_alvo([vir, pri])["nome"] == "P"
+    assert m.monitor_alvo([vir]) is None
+
+
+def test_preencher_muda_o_tamanho_e_volta_depois_do_scrcpy(m):
+    assert m.main(["celular", "--preencher"]) == 0
+    (c,) = scrcpys(m)
+    assert "--fullscreen" in c and "--window-x=1480" in c and "--window-y=40" in c
+    ordem = [x for x in m.estado["chamadas"] if x[0] == "scrcpy.exe" or x[3:5] == ["shell", "wm"]]
+    assert [x[4:] if x[0] == "adb" else "scrcpy" for x in ordem] == [
+        ["wm", "size"], ["wm", "size", "720x1280"], "scrcpy", ["wm", "size", "reset"]]
+    assert not m.MARCA.exists()
+
+
+def test_preencher_volta_mesmo_se_o_scrcpy_falhar(m):
+    antigo = m._executa
+
+    def quebra(cmd, **kw):
+        if cmd[0] == "scrcpy.exe":
+            raise OSError("caiu")
+        return antigo(cmd, **kw)
+    m._executa = quebra
+    with pytest.raises(OSError):
+        m.main(["celular", "--preencher"])
+    assert wms(m)[-1] == ["wm", "size", "reset"] and not m.MARCA.exists()
+
+
+def test_preencher_pela_tailscale_volta_antes_de_soltar(m):
+    m.estado["cabo"] = False
+    m.main(["celular", "--preencher"])
+    ch = m.estado["chamadas"]
+    reset = max(i for i, c in enumerate(ch) if c[-1:] == ["reset"])
+    solta = max(i for i, c in enumerate(ch) if c[:2] == ["adb", "disconnect"])
+    assert reset < solta
+
+
+def test_sem_preencher_nao_mexe_no_tamanho(m):
+    m.main(["celular"])
+    assert wms(m) == []
+    assert "--fullscreen" not in scrcpys(m)[0]
+
+
+def test_marca_esquecida_e_desfeita_na_proxima_vez(m):
+    m.MARCA.write_text("720x1280")
+    m.main(["celular"])
+    assert wms(m) == [["wm", "size", "reset"]] and not m.MARCA.exists()
+
+
+def test_normal_desfaz(m):
+    assert m.main(["normal"]) == 0
+    assert wms(m) == [["wm", "size", "reset"]]
+
+
+def test_menu_6_preenche(m, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda *_: "6")
+    m.main([])
+    assert "--fullscreen" in scrcpys(m)[0]

@@ -2,6 +2,10 @@
 """Segunda tela entre o PC e o A12 (pedido do Rafael, 05/11/2026), com cabo, Wi-Fi ou dados moveis.
 
   python scripts/segunda-tela.py celular [--leve]             o PC mostra e comanda a tela do celular (scrcpy)
+  python scripts/segunda-tela.py celular --preencher          igual, em tela cheia na TV (ou no monitor principal) e SEM
+                                                              faixas: o celular desenha na proporcao da tela (wm size
+                                                              720x1280 para 16:9) e volta ao normal ao fechar a janela
+  python scripts/segunda-tela.py normal                       desfaz o --preencher se a janela do console foi fechada no X
   python scripts/segunda-tela.py extra [--app PACOTE] [--leve] o celular ganha uma TELA EXTRA, que aparece numa janela
                                                               do PC (scrcpy --new-display; padrao: Notas; o Fennec fica PRETO na tela virtual, conferido 05/11)
   python scripts/segunda-tela.py pc                           o celular vira MONITOR EXTRA do Windows (Sunshine no PC +
@@ -22,6 +26,7 @@ import subprocess
 import sys
 
 AQUI = pathlib.Path(__file__).resolve().parent
+MARCA = AQUI.parent / "diagnostico" / "segunda-tela-preencher.marca"  # existe = a tela do celular esta em tamanho trocado
 APP_PADRAO = "org.fossify.notes"
 # Apps que desenham na tela virtual (conferido 05/11: as Notas sim; o Fennec/GeckoView fica com a janela preta).
 APPS_EXTRA = [("Notas", "org.fossify.notes"), ("Arquivos", "org.fossify.filemanager"), ("Galeria", "org.fossify.gallery"),
@@ -85,27 +90,143 @@ def tamanho_monitor():
         return 1440, 900
 
 
-def roda_scrcpy(args, serial, soltar):
+def monitores():
+    """Telas do Windows: [{nome, x, y, w, h, principal, tv, virtual}]. TV = monitor DEFAULT_MONITOR (a do Miracast);
+    virtual = MTT1337 (o monitor do celular no Moonlight). Fora do Windows: []."""
+    try:
+        from ctypes import wintypes as wt
+        u = ctypes.windll.user32
+        u.SetProcessDPIAware()
+    except (AttributeError, OSError, ImportError):
+        return []
+
+    class INFO(ctypes.Structure):
+        _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD),
+                    ("szDevice", wt.WCHAR * 32)]
+
+    class DISP(ctypes.Structure):
+        _fields_ = [("cb", wt.DWORD), ("DeviceName", wt.WCHAR * 32), ("DeviceString", wt.WCHAR * 128),
+                    ("StateFlags", wt.DWORD), ("DeviceID", wt.WCHAR * 128), ("DeviceKey", wt.WCHAR * 128)]
+
+    lista = []
+
+    def cada(hmon, _hdc, _ret, _p):
+        i = INFO()
+        i.cbSize = ctypes.sizeof(i)
+        if u.GetMonitorInfoW(hmon, ctypes.byref(i)):
+            ids = ""
+            d = DISP()
+            d.cb = ctypes.sizeof(d)
+            j = 0
+            while u.EnumDisplayDevicesW(i.szDevice, j, ctypes.byref(d), 0):
+                ids += d.DeviceID.upper() + " "
+                j += 1
+            r = i.rcMonitor
+            lista.append({"nome": i.szDevice, "x": r.left, "y": r.top, "w": r.right - r.left, "h": r.bottom - r.top,
+                          "principal": bool(i.dwFlags & 1), "tv": "DEFAULT_MONITOR" in ids, "virtual": "MTT1337" in ids})
+        return True
+
+    proc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HMONITOR, wt.HDC, ctypes.POINTER(wt.RECT), wt.LPARAM)(cada)
+    u.EnumDisplayMonitors(None, None, proc, 0)
+    return lista
+
+
+def monitor_alvo(lista):
+    """A TV sem fio, se estiver conectada; senao o monitor principal (nunca o virtual do celular)."""
+    reais = [m for m in lista if not m["virtual"]]
+    for m in reais:
+        if m["tv"]:
+            return m
+    for m in reais:
+        if m["principal"]:
+            return m
+    return reais[0] if reais else None
+
+
+def tamanho_fisico(serial):
+    """(lado curto, lado longo) da tela do celular, pelo `wm size` (A12: 720x1600)."""
+    r = _executa(["adb", "-s", serial, "shell", "wm", "size"], capture_output=True, text=True)
+    for linha in (r.stdout or "").splitlines():
+        if linha.startswith("Physical size:"):
+            a, b = (int(v) for v in linha.split(":")[1].strip().split("x"))
+            return min(a, b), max(a, b)
+    return None
+
+
+def forma_para(fisico, w, h):
+    """Tamanho (em pe) que deixa a tela do celular na MESMA proporcao do monitor: o espelho deitado preenche a tela
+    sem faixas. Mantem o lado curto (720) e encurta o longo: 1920x1080 (16:9) -> 720x1280. None = nada a mudar."""
+    if not fisico or not w or not h:
+        return None
+    curto, longo = fisico
+    novo = int(round(curto * max(w, h) / min(w, h) / 2.0)) * 2
+    return None if novo >= longo else (curto, novo)
+
+
+def volta_tamanho(serial):
+    _executa(["adb", "-s", serial, "shell", "wm", "size", "reset"], capture_output=True, text=True)
+    try:
+        MARCA.unlink()
+    except FileNotFoundError:
+        pass
+    print("Tela do celular de volta ao tamanho normal (720x1600).")
+
+
+def roda_scrcpy(args, serial, soltar, ao_fim=None):
     exe = scrcpy()
     if not exe:
         print("Falta o scrcpy no PC (winget install Genymobile.scrcpy).")
+        if ao_fim:
+            ao_fim()
         return 2
     print("Abrindo (feche a janela para terminar)... conexao: " + ("cabo" if ":" not in serial else "Tailscale " + serial))
     try:
         return _executa([exe, "-s", serial, *args]).returncode
     finally:
+        if ao_fim:
+            ao_fim()  # antes de soltar a Tailscale: depois nao ha mais como falar com o celular
         if soltar:
             remoto().soltar()
 
 
-def celular(leve):
+def celular(leve, preencher=False):
     serial, soltar = conecta()
     if not serial:
         return 1
     args = ["--window-title=Celular (A12)"] + (["--stay-awake"] if ":" not in serial else [])
     if leve:
         args += ["--video-bit-rate=2M", "--max-size=1024", "--max-fps=30", "--no-audio"]
-    return roda_scrcpy(args, serial, soltar)
+    ao_fim = None
+    if MARCA.exists():  # uma sessao anterior foi fechada sem desfazer (janela do console fechada no X)
+        volta_tamanho(serial)
+    if preencher:
+        mon = monitor_alvo(monitores())
+        if mon:
+            print("Tela cheia em %s (%dx%d%s)." % (mon["nome"], mon["w"], mon["h"], ", a TV" if mon["tv"] else ""))
+            args += ["--fullscreen", "--window-x=%d" % (mon["x"] + 40), "--window-y=%d" % (mon["y"] + 40)]
+            novo = forma_para(tamanho_fisico(serial), mon["w"], mon["h"])
+            if novo:
+                MARCA.parent.mkdir(exist_ok=True)
+                MARCA.write_text("%dx%d\n" % novo)
+                _executa(["adb", "-s", serial, "shell", "wm", "size", "%dx%d" % novo], capture_output=True, text=True)
+                print("Celular desenhando em %dx%d (a proporcao da tela): deitado, preenche sem faixas." % novo)
+                print("No proprio celular aparecem faixas pretas enquanto isso; tudo volta ao fechar a janela.")
+                ao_fim = lambda: volta_tamanho(serial)  # noqa: E731
+        print("Alt+F liga e desliga a tela cheia (no scrcpy o F11 nao vale).")
+    return roda_scrcpy(args, serial, soltar, ao_fim)
+
+
+def normal():
+    """Desfaz o preencher a mao (se a janela do console foi fechada no X e a tela do celular ficou menor)."""
+    serial, soltar = conecta()
+    if not serial:
+        return 1
+    try:
+        volta_tamanho(serial)
+    finally:
+        if soltar:
+            remoto().soltar()
+    return 0
 
 
 def extra(app, leve):
@@ -164,13 +285,14 @@ def menu():
     print(" 3  Celular como MONITOR EXTRA do PC")
     print(" 4  Igual ao 1, versao leve (dados moveis)")
     print(" 5  Parar o monitor extra (Sunshine)")
+    print(" 6  Igual ao 1, PREENCHENDO a TV ou o monitor (tela cheia, sem faixas)")
     print(" 0  Sair")
     try:
         op = input("Escolha: ").strip()
     except EOFError:
         return 0
     return {"1": lambda: celular(False), "2": lambda: extra(escolhe_app(), False), "3": pc, "4": lambda: celular(True),
-            "5": pc_parar}.get(op, lambda: 0)()
+            "5": pc_parar, "6": lambda: celular(False, True)}.get(op, lambda: 0)()
 
 
 def main(args):
@@ -186,7 +308,9 @@ def main(args):
             return 2
     cmd = args[0]
     if cmd == "celular":
-        return celular(leve)
+        return celular(leve, "--preencher" in args)
+    if cmd == "normal":
+        return normal()
     if cmd == "extra":
         return extra(app, leve)
     if cmd == "pc":
