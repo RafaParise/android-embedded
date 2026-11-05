@@ -383,11 +383,11 @@ case "${1:-status}" in
     fi
     echo "== telas"; for t in $TELAS; do case "${t%%:*}" in *"$txt"*) echo "cel abrir ${t%%:*}" ;; esac; done ;;
   tv)
-    abre android.settings.CAST_SETTINGS
-    echo "Abri a transmissao de tela do Android (a TV e o celular na mesma rede Wi-Fi; a TV precisa aceitar Miracast ou Chromecast)."
-    if conecta 2>/dev/null; then S=$(serial)
-      echo "Apps de espelhamento instalados:"; sh_ "pm list packages" | tr -d '\r' | grep -iE 'smartmirroring|miracast|screenstream|cast|smartview' | sed 's/^package:/  /'
-    fi ;;
+    # 05/11: este A12 nao tem o Smart View (firmware) e o Miracast do Android fica indisponivel sem ele; o que
+    # funciona e o ScreenStream (a tela vai para o navegador da TV ou do PC). O Miracast shortcut foi desativado.
+    precisa; sh_ "monkey -p info.dvkr.screenstream -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1
+    echo "Abri o ScreenStream: toque em Iniciar e abra na TV (ou no PC) o endereco que ele mostra, na mesma rede Wi-Fi."
+    echo "Miracast direto para a TV nao funciona neste A12 (sem Smart View). Outra saida: o celular no PC (Segunda tela) e o PC na TV." ;;
   microfone)
     precisa
     case "${2:-status}" in

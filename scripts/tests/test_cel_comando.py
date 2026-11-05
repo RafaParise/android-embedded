@@ -185,10 +185,10 @@ def test_procurar_junta_arquivos_apps_configuracoes_e_telas(cel):
     assert "bluetooth_on=1" in s and "cel abrir bluetooth" in s
 
 
-def test_tv_abre_a_transmissao_e_lista_espelhamento(cel):
+def test_tv_abre_o_screenstream(cel):
     _conectado(cel)
     rc, s = cel.roda("tv")
-    assert "CAST_SETTINGS" in cel.registro() and "smartmirroring" in s
+    assert "info.dvkr.screenstream" in cel.registro() and "ScreenStream" in s and "CAST_SETTINGS" not in cel.registro()
 
 
 def test_status_sem_conexao_nao_quebra(cel):
