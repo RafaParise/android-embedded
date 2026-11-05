@@ -45,6 +45,8 @@ def m(tmp_path):
     mod.scrcpy = lambda: "scrcpy.exe"
     mod.tamanho_monitor = lambda: (1440, 900)
     mod.MARCA = tmp_path / "preencher.marca"
+    mod.INTERVALO = 0.01
+    mod.onde_esta = lambda titulo: None  # sem janela real: a vigia nao faz nada nos testes antigos
     mod.monitores = lambda: [
         {"nome": "DISPLAY1", "x": 0, "y": 0, "w": 1440, "h": 900, "principal": True, "tv": False, "virtual": False},
         {"nome": "DISPLAY8", "x": 1440, "y": 0, "w": 1920, "h": 1080, "principal": False, "tv": True, "virtual": False}]
@@ -211,3 +213,76 @@ def test_menu_6_preenche(m, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *_: "6")
     m.main([])
     assert "--fullscreen" in scrcpys(m)[0]
+
+
+class Parar:
+    """Evento falso: deixa a vigia dar N olhadas e para."""
+    def __init__(self, n):
+        self.n = n
+
+    def wait(self, _):
+        self.n -= 1
+        return self.n < 0
+
+
+PC = {"hwnd": 1, "tv": False, "virtual": False, "cheia": False, "w": 1440, "h": 900}
+PC_CHEIA = dict(PC, cheia=True)
+TV = {"hwnd": 1, "tv": True, "virtual": False, "cheia": False, "w": 1920, "h": 1080}
+TV_CHEIA = dict(TV, cheia=True)
+
+
+def roda_vigia(m, posicoes, cheia_ok=True):
+    fila = list(posicoes)
+    m.onde_esta = lambda titulo: fila.pop(0) if fila else None
+    pedidos = []
+    m.poe_tela_cheia = lambda hwnd: pedidos.append(hwnd) or cheia_ok
+    a = m.Ajuste("RQ8")
+    m.vigia(a, Parar(len(posicoes)))
+    return a, pedidos
+
+
+def test_quer_tamanho(m):
+    f = (720, 1600)
+    assert m.quer_tamanho(f, None) is None
+    assert m.quer_tamanho(f, PC) is None
+    assert m.quer_tamanho(f, PC_CHEIA) == (720, 1152)
+    assert m.quer_tamanho(f, TV) == (720, 1280)
+    assert m.quer_tamanho(f, dict(TV_CHEIA, virtual=True)) is None
+
+
+def test_janela_vai_para_a_tv_e_volta(m):
+    a, pedidos = roda_vigia(m, [PC, TV, TV_CHEIA, TV_CHEIA, PC])
+    assert pedidos == [1]  # tela cheia pedida UMA vez na chegada
+    assert wms(m) == [["wm", "size"], ["wm", "size", "720x1280"], ["wm", "size", "reset"]]
+    assert a.atual is None and not m.MARCA.exists()
+
+
+def test_sai_da_tela_cheia_na_tv_e_nao_e_forcado_de_novo(m):
+    a, pedidos = roda_vigia(m, [TV, TV_CHEIA, TV, TV])
+    assert pedidos == [1] and a.atual == (720, 1280)
+
+
+def test_tela_cheia_recusada_avisa_e_preenche_mesmo_assim(m, capsys):
+    a, pedidos = roda_vigia(m, [TV], cheia_ok=False)
+    assert "Alt+F" in capsys.readouterr().out and a.atual == (720, 1280)
+
+
+def test_tela_cheia_no_monitor_do_pc_tambem_preenche(m):
+    a, pedidos = roda_vigia(m, [PC_CHEIA])
+    assert pedidos == [] and a.atual == (720, 1152)
+
+
+def test_fechar_a_janela_desfaz_o_que_a_vigia_fez(m):
+    fila = [TV_CHEIA]
+    m.onde_esta = lambda titulo: fila.pop(0) if fila else None
+    m.poe_tela_cheia = lambda hwnd: True
+    antigo = m._executa
+
+    def lento(cmd, **kw):  # o scrcpy fica aberto um pouco, para a vigia olhar
+        if cmd[0] == "scrcpy.exe":
+            import time
+            time.sleep(0.2)
+        return antigo(cmd, **kw)
+    m._executa = lento
+    m.main(["celular"])
+    assert wms(m)[-2:] == [["wm", "size", "720x1280"], ["wm", "size", "reset"]] and not m.MARCA.exists()

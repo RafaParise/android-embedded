@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Segunda tela entre o PC e o A12 (pedido do Rafael, 05/11/2026), com cabo, Wi-Fi ou dados moveis.
 
-  python scripts/segunda-tela.py celular [--leve]             o PC mostra e comanda a tela do celular (scrcpy)
-  python scripts/segunda-tela.py celular --preencher          igual, em tela cheia na TV (ou no monitor principal) e SEM
-                                                              faixas: o celular desenha na proporcao da tela (wm size
-                                                              720x1280 para 16:9) e volta ao normal ao fechar a janela
+  python scripts/segunda-tela.py celular [--leve]             o PC mostra e comanda a tela do celular (scrcpy). AUTOMATICO:
+                                                              janela levada para a TV = tela cheia e SEM faixas (o celular
+                                                              desenha na proporcao dela: wm size 720x1280 para 16:9); Alt+F
+                                                              em qualquer monitor = idem; de volta ao monitor do PC em
+                                                              janela = celular normal; fechar a janela = tudo normal
+  python scripts/segunda-tela.py celular --preencher          igual, mas ja abre em tela cheia na TV (ou no monitor principal)
   python scripts/segunda-tela.py normal                       desfaz o --preencher se a janela do console foi fechada no X
   python scripts/segunda-tela.py extra [--app PACOTE] [--leve] o celular ganha uma TELA EXTRA, que aparece numa janela
                                                               do PC (scrcpy --new-display; padrao: Notas; o Fennec fica PRETO na tela virtual, conferido 05/11)
@@ -24,6 +26,8 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 AQUI = pathlib.Path(__file__).resolve().parent
 MARCA = AQUI.parent / "diagnostico" / "segunda-tela-preencher.marca"  # existe = a tela do celular esta em tamanho trocado
@@ -90,24 +94,46 @@ def tamanho_monitor():
         return 1440, 900
 
 
+_WIN = {}
+
+
+def _win():
+    """(user32, wintypes, INFO, DISP) no Windows; None fora dele (os testes rodam no Linux)."""
+    if not _WIN:
+        try:
+            from ctypes import wintypes as wt
+            u = ctypes.windll.user32
+            u.SetProcessDPIAware()
+        except (AttributeError, OSError, ImportError, ValueError):
+            return None
+
+        class INFO(ctypes.Structure):
+            _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD),
+                        ("szDevice", wt.WCHAR * 32)]
+
+        class DISP(ctypes.Structure):
+            _fields_ = [("cb", wt.DWORD), ("DeviceName", wt.WCHAR * 32), ("DeviceString", wt.WCHAR * 128),
+                        ("StateFlags", wt.DWORD), ("DeviceID", wt.WCHAR * 128), ("DeviceKey", wt.WCHAR * 128)]
+
+        u.FindWindowW.restype = wt.HWND
+        u.MonitorFromWindow.restype = wt.HMONITOR
+        u.MonitorFromWindow.argtypes = [wt.HWND, wt.DWORD]
+        u.GetMonitorInfoW.argtypes = [wt.HMONITOR, ctypes.c_void_p]
+        u.GetWindowRect.argtypes = [wt.HWND, ctypes.c_void_p]
+        u.IsIconic.argtypes = [wt.HWND]
+        u.SetForegroundWindow.argtypes = [wt.HWND]
+        u.GetForegroundWindow.restype = wt.HWND
+        _WIN.update(u=u, wt=wt, INFO=INFO, DISP=DISP)
+    return _WIN["u"], _WIN["wt"], _WIN["INFO"], _WIN["DISP"]
+
+
 def monitores():
     """Telas do Windows: [{nome, x, y, w, h, principal, tv, virtual}]. TV = monitor DEFAULT_MONITOR (a do Miracast);
     virtual = MTT1337 (o monitor do celular no Moonlight). Fora do Windows: []."""
-    try:
-        from ctypes import wintypes as wt
-        u = ctypes.windll.user32
-        u.SetProcessDPIAware()
-    except (AttributeError, OSError, ImportError):
+    w = _win()
+    if not w:
         return []
-
-    class INFO(ctypes.Structure):
-        _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD),
-                    ("szDevice", wt.WCHAR * 32)]
-
-    class DISP(ctypes.Structure):
-        _fields_ = [("cb", wt.DWORD), ("DeviceName", wt.WCHAR * 32), ("DeviceString", wt.WCHAR * 128),
-                    ("StateFlags", wt.DWORD), ("DeviceID", wt.WCHAR * 128), ("DeviceKey", wt.WCHAR * 128)]
-
+    u, wt, INFO, DISP = w
     lista = []
 
     def cada(hmon, _hdc, _ret, _p):
@@ -172,7 +198,107 @@ def volta_tamanho(serial):
     print("Tela do celular de volta ao tamanho normal (720x1600).")
 
 
-def roda_scrcpy(args, serial, soltar, ao_fim=None):
+TITULO = "Celular (A12)"
+INTERVALO = 1.0  # segundos entre as olhadas na janela (os testes poem 0)
+
+
+def onde_esta(titulo):
+    """Onde a janela do scrcpy esta: {hwnd, tv, virtual, cheia, w, h} do monitor dela; None se nao existe ou minimizada."""
+    w = _win()
+    if not w:
+        return None
+    u, wt, INFO, _ = w
+    hwnd = u.FindWindowW(None, titulo)
+    if not hwnd or u.IsIconic(hwnd):
+        return None
+    r = wt.RECT()
+    u.GetWindowRect(hwnd, ctypes.byref(r))
+    i = INFO()
+    i.cbSize = ctypes.sizeof(i)
+    if not u.GetMonitorInfoW(u.MonitorFromWindow(hwnd, 2), ctypes.byref(i)):
+        return None
+    mr = i.rcMonitor
+    mon = next((m for m in monitores() if m["nome"] == i.szDevice), {})
+    return {"hwnd": hwnd, "tv": mon.get("tv", False), "virtual": mon.get("virtual", False),
+            "cheia": (r.left, r.top, r.right, r.bottom) == (mr.left, mr.top, mr.right, mr.bottom),
+            "w": mr.right - mr.left, "h": mr.bottom - mr.top}
+
+
+def poe_tela_cheia(hwnd):
+    """Alt+F na janela do scrcpy (o atalho de tela cheia dele). So aperta o F se a janela ficou mesmo em primeiro
+    plano: senao o Alt+F iria para outro programa. Devolve True se mandou."""
+    w = _win()
+    if not w:
+        return False
+    u = w[0]
+    u.keybd_event(0x12, 0, 0, 0)  # Alt apertado: o Windows deixa trazer a janela para frente
+    try:
+        u.SetForegroundWindow(hwnd)
+        time.sleep(0.2)
+        if u.GetForegroundWindow() != hwnd:
+            return False
+        u.keybd_event(0x46, 0, 0, 0)
+        u.keybd_event(0x46, 0, 2, 0)
+        return True
+    finally:
+        u.keybd_event(0x12, 0, 2, 0)
+
+
+def quer_tamanho(fisico, local):
+    """Na TV ou em tela cheia em qualquer monitor: o celular na proporcao daquela tela. Janela comum no monitor do PC
+    (ou no monitor virtual do proprio celular): tamanho normal (None)."""
+    if not local or local["virtual"] or not (local["tv"] or local["cheia"]):
+        return None
+    return forma_para(fisico, local["w"], local["h"])
+
+
+class Ajuste:
+    """Guarda o tamanho que a tela do celular tem agora e so chama o adb quando muda."""
+
+    def __init__(self, serial):
+        self.serial, self.atual, self._fisico = serial, None, None
+
+    @property
+    def fisico(self):
+        if self._fisico is None:
+            self._fisico = tamanho_fisico(self.serial)
+        return self._fisico
+
+    def aplica(self, alvo):
+        if alvo == self.atual:
+            return
+        if alvo:
+            MARCA.parent.mkdir(exist_ok=True)
+            MARCA.write_text("%dx%d\n" % alvo)
+            _executa(["adb", "-s", self.serial, "shell", "wm", "size", "%dx%d" % alvo], capture_output=True, text=True)
+            print("Celular desenhando em %dx%d (a proporcao da tela): deitado, preenche sem faixas;" % alvo)
+            print("no proprio celular aparecem faixas enquanto isso.")
+        else:
+            volta_tamanho(self.serial)
+        self.atual = alvo
+
+
+def vigia(ajuste, parar, ja_cheia=False):
+    """Enquanto a janela esta aberta: chegou na TV = tela cheia (uma vez por chegada) e celular no formato dela;
+    voltou ao monitor do PC em janela comum = celular normal."""
+    while not parar.wait(INTERVALO):
+        local = onde_esta(TITULO)
+        if local is None:
+            continue
+        if local["tv"] and not local["cheia"] and not ja_cheia:
+            ja_cheia = True
+            if poe_tela_cheia(local["hwnd"]):
+                continue  # na proxima olhada ela ja esta em tela cheia
+            print("Para tela cheia: clique na janela do celular e aperte Alt+F.")
+        if not local["tv"]:
+            ja_cheia = False
+        try:
+            ajuste.aplica(quer_tamanho(ajuste.fisico, local))
+        except OSError:
+            pass  # adb caiu um instante: tenta de novo na proxima olhada
+
+
+def roda_scrcpy(args, serial, soltar, ao_fim=None, durante=None):
     exe = scrcpy()
     if not exe:
         print("Falta o scrcpy no PC (winget install Genymobile.scrcpy).")
@@ -180,9 +306,17 @@ def roda_scrcpy(args, serial, soltar, ao_fim=None):
             ao_fim()
         return 2
     print("Abrindo (feche a janela para terminar)... conexao: " + ("cabo" if ":" not in serial else "Tailscale " + serial))
+    parar = threading.Event()
+    t = None
     try:
+        if durante:
+            t = threading.Thread(target=durante, args=(parar,), daemon=True)
+            t.start()
         return _executa([exe, "-s", serial, *args]).returncode
     finally:
+        parar.set()
+        if t:
+            t.join(10)
         if ao_fim:
             ao_fim()  # antes de soltar a Tailscale: depois nao ha mais como falar com o celular
         if soltar:
@@ -193,27 +327,25 @@ def celular(leve, preencher=False):
     serial, soltar = conecta()
     if not serial:
         return 1
-    args = ["--window-title=Celular (A12)"] + (["--stay-awake"] if ":" not in serial else [])
+    args = ["--window-title=" + TITULO] + (["--stay-awake"] if ":" not in serial else [])
     if leve:
         args += ["--video-bit-rate=2M", "--max-size=1024", "--max-fps=30", "--no-audio"]
-    ao_fim = None
     if MARCA.exists():  # uma sessao anterior foi fechada sem desfazer (janela do console fechada no X)
         volta_tamanho(serial)
+    ajuste = Ajuste(serial)
     if preencher:
         mon = monitor_alvo(monitores())
         if mon:
             print("Tela cheia em %s (%dx%d%s)." % (mon["nome"], mon["w"], mon["h"], ", a TV" if mon["tv"] else ""))
             args += ["--fullscreen", "--window-x=%d" % (mon["x"] + 40), "--window-y=%d" % (mon["y"] + 40)]
-            novo = forma_para(tamanho_fisico(serial), mon["w"], mon["h"])
-            if novo:
-                MARCA.parent.mkdir(exist_ok=True)
-                MARCA.write_text("%dx%d\n" % novo)
-                _executa(["adb", "-s", serial, "shell", "wm", "size", "%dx%d" % novo], capture_output=True, text=True)
-                print("Celular desenhando em %dx%d (a proporcao da tela): deitado, preenche sem faixas." % novo)
-                print("No proprio celular aparecem faixas pretas enquanto isso; tudo volta ao fechar a janela.")
-                ao_fim = lambda: volta_tamanho(serial)  # noqa: E731
-        print("Alt+F liga e desliga a tela cheia (no scrcpy o F11 nao vale).")
-    return roda_scrcpy(args, serial, soltar, ao_fim)
+            ajuste.aplica(forma_para(ajuste.fisico, mon["w"], mon["h"]))
+    print("Automatico: leve a janela para a TV (ou Alt+F em qualquer monitor) e a imagem preenche a tela; de volta ao")
+    print("monitor do PC em janela, o celular volta ao normal. Ao fechar a janela, tudo volta ao normal.")
+
+    def ao_fim():
+        if ajuste.atual:
+            ajuste.aplica(None)
+    return roda_scrcpy(args, serial, soltar, ao_fim, lambda parar: vigia(ajuste, parar, preencher))
 
 
 def normal():
