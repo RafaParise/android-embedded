@@ -60,7 +60,7 @@ MAX_PAREAMENTOS_PENDENTES = 5
 URL_PUBLICA_PADRAO = "http://100.64.0.1:20130"     # o PC na Tailscale (IP fixo do aparelho); --url-publica troca
 URL_PUBLICA_OK = re.compile(r"http://[A-Za-z0-9.\-]{1,100}:\d{2,5}")
 TOKEN_OK = re.compile(r"[A-Za-z0-9_\-]{32,128}")
-ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
+ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
 MAX_ACOES_POR_MINUTO = 6
 MAX_ACAO_S = 300
 MAX_SAIDA_ACAO = 6000
@@ -132,6 +132,7 @@ DOCS_MEMORIA = ["CLAUDE.md"] + [f"memoria/{n}.md" for n in (
     "TELA-APAGADA", "QWEN-CELULAR", "PROTOCOLO-IAS", "ECOSSISTEMA-IA", "LINUX-A12", "CONTROLES-GAMESIR", "OBS-ESTUDIO",
     "ADGUARD-PC", "COPIA-E-RESTAURAR", "MAPAS-LUGARES", "GUIA-IA-NO-CELULAR", "PLAY-PARA-FONTE", "WEBCAM-E-RECUPERACAO",
     "PLANO-MATRIX", "CONFERENCIA-PEDIDOS", "ACESSO-REMOTO", "LICOES-MATRIX", "RECEITAS-ANDROID", "VOZ-OFFLINE", "MATRIX-ALINHAMENTO")]
+DOCS_MATRIX_CELULAR = ["memoria/BLUEPRINT-A12.md", "memoria/PLANO.md"]  # em C:\Projetos\matrix-celular (lista fechada)
 PASTAS_FORA_MEMORIA = {"qwen-celular", "hermes-trabalho", "node_modules", ".git", "backups", "backup", "diagnostico", "venv", ".venv"}
 _RE_ALUNO = re.compile(r"(?i)mapao|mapão|aluno|alunos|boletim|notas[ _-]?(finais|bimestr)|\bRA\s*[:=]?\s*\d{6,}")
 _RE_PESSOAL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+|\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\bRA\s*[:=]?\s*\d{6,}")  # linhas com isso saem
@@ -411,24 +412,30 @@ ponte_instalar() {
   cat > "$B/.memoria.novo" <<'@@FIM_MEM@@' || cat_falhou=1
 @@MEM@@
 @@FIM_MEM@@
+  cat > "$B/.link.novo" <<'@@FIM_LINK@@' || cat_falhou=1
+@@LINK@@
+@@FIM_LINK@@
+  cat > "$B/.controle-tv.novo" <<'@@FIM_CTV@@' || cat_falhou=1
+@@CTV@@
+@@FIM_CTV@@
   cat > "$T/.iniciar-a12.novo" <<'@@FIM_BOOT@@' || cat_falhou=1
 @@BOOT@@
 @@FIM_BOOT@@
   cat > "$Q/.QWEN.md.novo" <<'@@FIM_QWEN@@' || cat_falhou=1
 @@QWEN_MD@@
 @@FIM_QWEN@@
-  if [ "$cat_falhou" != 0 ] || [ ! -s "$B/.ia.novo" ] || [ ! -s "$B/.caixa.novo" ] || [ ! -s "$B/.saida.novo" ] || [ ! -s "$B/.guarda.novo" ] || [ ! -s "$B/.cel.novo" ] || [ ! -s "$B/.memoria.novo" ] || [ ! -s "$T/.iniciar-a12.novo" ] || [ ! -s "$Q/.QWEN.md.novo" ]; then
+  if [ "$cat_falhou" != 0 ] || [ ! -s "$B/.ia.novo" ] || [ ! -s "$B/.caixa.novo" ] || [ ! -s "$B/.saida.novo" ] || [ ! -s "$B/.guarda.novo" ] || [ ! -s "$B/.cel.novo" ] || [ ! -s "$B/.memoria.novo" ] || [ ! -s "$B/.link.novo" ] || [ ! -s "$B/.controle-tv.novo" ] || [ ! -s "$T/.iniciar-a12.novo" ] || [ ! -s "$Q/.QWEN.md.novo" ]; then
     echo "Nao consegui gravar os arquivos novos (armazenamento cheio?). Nada foi trocado; libere espaco e rode de novo."
-    rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
+    rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
   fi
-  for f in "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$T/.iniciar-a12.novo"; do
-    "$BASH" -n "$f" 2>/dev/null || { echo "O arquivo '$f' chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1; }
+  for f in "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.link.novo" "$T/.iniciar-a12.novo"; do
+    "$BASH" -n "$f" 2>/dev/null || { echo "O arquivo '$f' chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1; }
   done
-  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/.memoria.novo" 2>/dev/null; then
-    echo "O arquivo memoria chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
+  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read()); ast.parse(open(sys.argv[2], encoding="utf-8").read())' "$B/.memoria.novo" "$B/.controle-tv.novo" 2>/dev/null; then
+    echo "O arquivo memoria ou controle-tv chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
   fi
 @@BLOCO_TOKEN@@
-  for f in ia caixa saida guarda cel memoria; do
+  for f in ia caixa saida guarda cel memoria link controle-tv; do
     [ -e "$A/$f" ] || { [ -e "$B/$f" ] && cp -p "$B/$f" "$A/$f"; }
     chmod 755 "$B/.$f.novo" && mv -f "$B/.$f.novo" "$B/$f" && echo "  [ok]  comando $f instalado em ~/bin" || { echo "  [--]  nao consegui instalar o comando $f"; rm -f "$B/.$f.novo"; erro=1; }
   done
@@ -527,6 +534,8 @@ class Ponte:
 
         for rel in DOCS_MEMORIA:
             poe("pc-" + re.sub(r"[^a-z0-9]+", "-", Path(rel).stem.lower()).strip("-") + ".md", self.projeto / rel)
+        for rel in DOCS_MATRIX_CELULAR:  # o que e do Matrix mora no projeto dele (pedido do Rafael, 05/11): blueprint e plano
+            poe("pc-matrix-" + re.sub(r"[^a-z0-9]+", "-", Path(rel).stem.lower()).strip("-") + ".md", self.pasta_projetos / "matrix-celular" / rel)
         repos = [("Android Embeeded", self.projeto)]
         if self.pasta_projetos.is_dir():  # os outros projetos com git (ARENA, aulas, kit de IA...): so o titulo dos commits
             for g in sorted(list(self.pasta_projetos.glob("*/.git")) + list(self.pasta_projetos.glob("*/*/.git")) + list(self.pasta_projetos.glob("*/*/*/.git")))[:15]:
@@ -793,7 +802,7 @@ class Ponte:
         textos = self._arquivos_kit_celular()
         versao = self.kit_versao()
         delimitadores = {}
-        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
+        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
             texto = _MESCLA_PY.rstrip("\n") if chave == "mescla" else textos[chave]
             delim = f"PONTE_FIM_{nome}_{hashlib.sha256(texto.encode('utf-8')).hexdigest()[:8].upper()}"
             if delim in texto.split("\n"):
@@ -802,7 +811,7 @@ class Ponte:
         bloco_env = _BLOCO_TOKEN_NOVO.replace("@@TOKEN@@", token) if token is not None else _BLOCO_TOKEN_JA_TEM  # (nome sem "token = " colado: o varredor de segredos do sync pega)
         valores = {
             "VERSAO": versao, "URL": url, "BLOCO_TOKEN": bloco_env,
-            "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
+            "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "LINK": textos["link"], "FIM_LINK": delimitadores["LINK"], "CTV": textos["controle_tv"], "FIM_CTV": delimitadores["CTV"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
             "FIM_IA": delimitadores["IA"], "FIM_CAIXA": delimitadores["CAIXA"], "FIM_SAIDA": delimitadores["SAIDA"], "FIM_BOOT": delimitadores["BOOT"], "FIM_QWEN": delimitadores["QWEN"], "FIM_PY": delimitadores["PY"],
         }
         return re.sub(r"@@([A-Z_]+)@@", lambda m: valores[m.group(1)], _MODELO_INSTALADOR)

@@ -373,3 +373,14 @@ def test_arquivos_pula_bibliotecas_de_terceiros(cel, tmp_path):
     cel.roda("arquivos", env_extra=env)
     rc, s = cel.roda("buscar", "quadricoptero", "-n", "20", env_extra=env)
     assert "timeit.html" not in s and "util.py" in s
+
+
+def test_pacote_traz_o_blueprint_e_o_plano_do_projeto_matrix_celular(ponte):
+    mc = ponte.pasta_projetos / "matrix-celular" / "memoria"
+    mc.mkdir(parents=True)
+    (mc / "BLUEPRINT-A12.md").write_text("# BLUEPRINT\nsem infravermelho\nconta: alguem@exemplo.com\n", encoding="utf-8")
+    (mc / "PLANO.md").write_text("# plano do Matrix\n", encoding="utf-8")
+    (mc / "OUTRO.md").write_text("# nao vai\n", encoding="utf-8")
+    arq = ponte.memoria_pacote()["arquivos"]
+    assert "sem infravermelho" in arq["pc-matrix-blueprint-a12.md"] and "alguem@" not in arq["pc-matrix-blueprint-a12.md"]
+    assert "pc-matrix-plano.md" in arq and not [k for k in arq if "outro" in k]

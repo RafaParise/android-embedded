@@ -419,6 +419,20 @@ case "${1:-status}" in
       echo "== configuracoes"; for ns in global secure system; do sh_ "settings list $ns" | tr -d '\r' | grep -i -- "$txt" | sed "s/^/$ns: /" | head -n 10; done
     fi
     echo "== telas"; for t in $TELAS; do case "${t%%:*}" in *"$txt"*) echo "cel abrir ${t%%:*}" ;; esac; done ;;
+  enviar-pc) # foto, video ou arquivo para o PC pelo Compartilhar do KDE Connect (Wi-Fi, dados ou fora: o PC conhece o IP da Tailscale)
+    shift; [ $# -gt 0 ] || { echo "Use: cel enviar-pc ARQUIVO [ARQUIVO...]   (chega em Downloads do PC)"; exit 2; }
+    precisa
+    PC_KDE="${CEL_PC_KDE:-RafaParise}"
+    for f in "$@"; do
+      case "$f" in /sdcard/*|/storage/*) ;; *) echo "So arquivo do armazenamento (/sdcard/...): $f"; continue ;; esac
+      case "$f" in *[\'\"\`\$\;\&\|\<\>]*) echo "Nome com caractere perigoso, pulei: $f"; continue ;; esac
+      sh_ "test -f '$f'" || { echo "Nao existe: $f"; continue; }
+      tipo=$(case "${f##*.}" in jpg|jpeg|JPG|JPEG) echo image/jpeg ;; png|PNG) echo image/png ;; mp4|MP4) echo video/mp4 ;; pdf) echo application/pdf ;; *) echo '*/*' ;; esac)
+      sh_ "am start -a android.intent.action.SEND -t '$tipo' --eu android.intent.extra.STREAM 'file://$f' -n org.kde.kdeconnect_tp/org.kde.kdeconnect.plugins.share.ShareActivity" >/dev/null 2>&1
+      sleep 3
+      if "$0" tocar "$PC_KDE" >/dev/null 2>&1; then echo "Enviado ao PC (Downloads): $f"; else echo "Nao achei o PC \"$PC_KDE\" no KDE Connect (PC ligado? abra o KDE Connect e atualize): $f"; fi
+      sleep 2
+    done ;;
   obs) # celular no OBS do PC (webcam da aula, gravar camera ou tela, live), pela ponte do PC; vale em qualquer rede
     case "${2:-}" in
       camera) a=obs-camera-ligar ;; frontal) a=obs-camera-frontal ;; tela) a=obs-tela-ligar ;;

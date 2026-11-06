@@ -16,6 +16,9 @@ Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, 
 | "desliga a câmera do PC", "desliga tudo do OBS" | `cel obs desligar` |
 | "o que está ligado no PC?" | `cel obs status` |
 | "manda minha tela para a TV/aluno", "compartilha esse arquivo/app" | `link tela` / `link arquivo CAMINHO` / `link app PACOTE`; `link parar` |
+| "manda essa foto/vídeo/arquivo pro PC" | `cel enviar-pc /sdcard/CAMINHO` (chega em Downloads do PC; últimas fotos: `ls -t /sdcard/DCIM/Camera \| head -3`) |
+| "celular como monitor do PC", "segunda tela" | `cel abrir-app com.limelight` e diga: RafaParise > Desktop; para sair de vez: segurar o Desktop > "Sair do Jogo" > SIM |
+| "acha a TV", "controla a TV da sala" | `controle-tv procurar` e depois `controle-tv N volume+` / `mudo` / `ok` / `youtube` (sem N: a última TV); a TV precisa estar na mesma rede |
 | "liga/desliga a lanterna" | `cel lanterna ligar` / `cel lanterna desligar` |
 | "apaga/acende a tela" | `cel tela apagar` / `cel tela acender` |
 | "tela acesa no carregador" | `cel acordado ligar` / `desligar` |

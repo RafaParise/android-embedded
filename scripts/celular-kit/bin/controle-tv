@@ -1,0 +1,593 @@
+#!/usr/bin/env python3
+"""controle-tv: o celular como controle remoto de TVs da REDE (Wi-Fi da escola, de casa ou o hotspot do celular).
+
+  controle-tv procurar                 acha as TVs na rede (SSDP/UPnP + portas conhecidas) e numera
+  controle-tv lista                    as TVs achadas da ultima vez
+  controle-tv [N|IP] TECLA [TECLA...]  manda teclas (sem N/IP: a ultima TV usada)
+  controle-tv teclas                   lista as teclas
+
+Teclas: ligar desligar volume+ volume- mudo cima baixo esquerda direita ok voltar inicio canal+ canal- play pausa
+        netflix youtube  (repetir: "volume+ volume+ volume+" ou "volume+x5")
+Marcas (o tipo e reconhecido sozinho): Roku (porta 8060), Samsung Tizen (8001/8002: a TV pede "Permitir" na 1a vez),
+LG webOS (3000/3001: a TV pede para aceitar na 1a vez), Android/Google TV com depuracao ligada (adb 5555), e qualquer
+TV com DLNA (volume e mudo) ou DIAL (abrir YouTube/Netflix). "ligar" pela rede so com Wake-on-LAN (TV que guarda o MAC).
+Limites honestos: o Galaxy A12 NAO tem infravermelho; TV fora da rede (sem Wi-Fi) nao se controla; Bluetooth so com o
+app da marca. Para a TV entrar na rede uma vez, e preciso o controle dela ou os botoes da propria TV.
+As chaves que as TVs devolvem (Samsung, LG) ficam so em ~/.cache/controle-tv (nunca no git). Saida: 0 ok, 1 falhou, 2 uso.
+"""
+import base64
+import hashlib
+import http.client
+import json
+import os
+import pathlib
+import re
+import socket
+import ssl
+import struct
+import subprocess
+import sys
+import time
+import urllib.parse
+import xml.etree.ElementTree as ET
+
+CASA = pathlib.Path(os.environ.get("CONTROLE_TV_DIR", str(pathlib.Path.home() / ".cache" / "controle-tv")))
+SSDP_ALVO = os.environ.get("CONTROLE_TV_SSDP", "239.255.255.250:1900")
+TEMPO = float(os.environ.get("CONTROLE_TV_TEMPO", "3"))
+NOME_APP = "Controle do Rafael"
+TECLAS = ["ligar", "desligar", "volume+", "volume-", "mudo", "cima", "baixo", "esquerda", "direita", "ok", "voltar",
+          "inicio", "canal+", "canal-", "play", "pausa", "netflix", "youtube"]
+ROKU = {"desligar": "PowerOff", "ligar": "PowerOn", "volume+": "VolumeUp", "volume-": "VolumeDown", "mudo": "VolumeMute",
+        "cima": "Up", "baixo": "Down", "esquerda": "Left", "direita": "Right", "ok": "Select", "voltar": "Back",
+        "inicio": "Home", "canal+": "ChannelUp", "canal-": "ChannelDown", "play": "Play", "pausa": "Play"}
+ROKU_APPS = {"netflix": "12", "youtube": "837"}
+SAMSUNG = {"desligar": "KEY_POWER", "volume+": "KEY_VOLUP", "volume-": "KEY_VOLDOWN", "mudo": "KEY_MUTE", "cima": "KEY_UP",
+           "baixo": "KEY_DOWN", "esquerda": "KEY_LEFT", "direita": "KEY_RIGHT", "ok": "KEY_ENTER", "voltar": "KEY_RETURN",
+           "inicio": "KEY_HOME", "canal+": "KEY_CHUP", "canal-": "KEY_CHDOWN", "play": "KEY_PLAY", "pausa": "KEY_PAUSE"}
+SAMSUNG_APPS = {"netflix": "3201907018807", "youtube": "111299001912"}
+LG_SSAP = {"volume+": ("ssap://audio/volumeUp", None), "volume-": ("ssap://audio/volumeDown", None),
+           "desligar": ("ssap://system/turnOff", None), "canal+": ("ssap://tv/channelUp", None),
+           "canal-": ("ssap://tv/channelDown", None), "play": ("ssap://media.controls/play", None),
+           "pausa": ("ssap://media.controls/pause", None),
+           "netflix": ("ssap://system.launcher/launch", {"id": "netflix"}),
+           "youtube": ("ssap://system.launcher/launch", {"id": "youtube.leanback.v4"})}
+LG_BOTAO = {"cima": "UP", "baixo": "DOWN", "esquerda": "LEFT", "direita": "RIGHT", "ok": "ENTER", "voltar": "BACK", "inicio": "HOME"}
+ANDROID = {"desligar": "KEYCODE_POWER", "ligar": "KEYCODE_WAKEUP", "volume+": "KEYCODE_VOLUME_UP", "volume-": "KEYCODE_VOLUME_DOWN",
+           "mudo": "KEYCODE_VOLUME_MUTE", "cima": "KEYCODE_DPAD_UP", "baixo": "KEYCODE_DPAD_DOWN", "esquerda": "KEYCODE_DPAD_LEFT",
+           "direita": "KEYCODE_DPAD_RIGHT", "ok": "KEYCODE_DPAD_CENTER", "voltar": "KEYCODE_BACK", "inicio": "KEYCODE_HOME",
+           "canal+": "KEYCODE_CHANNEL_UP", "canal-": "KEYCODE_CHANNEL_DOWN", "play": "KEYCODE_MEDIA_PLAY", "pausa": "KEYCODE_MEDIA_PAUSE"}
+DIAL_APPS = {"netflix": "Netflix", "youtube": "YouTube"}
+PORTAS = {8060: "roku", 8002: "samsung", 8001: "samsung", 3000: "lg", 3001: "lg", 5555: "android", 1925: "philips", 36669: "hisense"}
+
+
+class Erro(Exception):
+    pass
+
+
+# ------------------------------------------------------------------ guardar TVs e chaves
+def le_json(nome, padrao):
+    try:
+        return json.loads((CASA / nome).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return padrao
+
+
+def grava_json(nome, dado):
+    CASA.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(CASA, 0o700)
+    except OSError:
+        pass
+    p = CASA / nome
+    p.write_text(json.dumps(dado, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+
+
+# ------------------------------------------------------------------ descoberta
+def resposta_ssdp(texto):
+    """Cabecalhos de uma resposta SSDP em minusculas."""
+    cab = {}
+    for linha in texto.split("\r\n")[1:]:
+        if ":" in linha:
+            k, v = linha.split(":", 1)
+            cab[k.strip().lower()] = v.strip()
+    return cab
+
+
+def tipo_por_cabecalho(cab):
+    s = " ".join(cab.get(k, "") for k in ("st", "server", "usn")).lower()
+    if "roku" in s:
+        return "roku"
+    if "samsung" in s or "tizen" in s:
+        return "samsung"
+    if "webos" in s or "lge" in s or "lg electronics" in s:
+        return "lg"
+    if "dial-multiscreen" in s:
+        return "dial"
+    if "mediarenderer" in s:
+        return "dlna"
+    return ""
+
+
+def procura_ssdp(segundos=TEMPO, ip_origem=""):
+    host, porta = SSDP_ALVO.rsplit(":", 1)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+    if ip_origem:
+        s.bind((ip_origem, 0))
+        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(ip_origem))
+    s.settimeout(0.5)
+    for st in ("ssdp:all", "roku:ecp", "urn:dial-multiscreen-org:service:dial:1", "urn:schemas-upnp-org:device:MediaRenderer:1"):
+        msg = f"M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: {st}\r\n\r\n"
+        try:
+            s.sendto(msg.encode(), (host, int(porta)))
+        except OSError:
+            pass
+    achados = {}
+    fim = time.time() + segundos
+    while time.time() < fim:
+        try:
+            dado, (ip, _) = s.recvfrom(4096)
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        cab = resposta_ssdp(dado.decode("utf-8", "replace"))
+        a = achados.setdefault(ip, {"ip": ip, "tipos": set(), "locais": set(), "servidor": ""})
+        t = tipo_por_cabecalho(cab)
+        if t:
+            a["tipos"].add(t)
+        if cab.get("location"):
+            a["locais"].add(cab["location"])
+        a["servidor"] = a["servidor"] or cab.get("server", "")
+    s.close()
+    return achados
+
+
+def porta_aberta(ip, porta, tempo=0.6):
+    try:
+        with socket.create_connection((ip, porta), timeout=tempo):
+            return True
+    except OSError:
+        return False
+
+
+def descricao(local):
+    """Nome amigavel e servicos (RenderingControl, Application-URL do DIAL) da descricao UPnP."""
+    u = urllib.parse.urlsplit(local)
+    if u.scheme != "http" or not u.hostname:
+        return {}
+    c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=TEMPO)
+    try:
+        c.request("GET", u.path or "/")
+        r = c.getresponse()
+        corpo = r.read(200_000)
+        app_url = r.getheader("Application-URL", "")
+    except OSError:
+        return {}
+    finally:
+        c.close()
+    info = {"app_url": app_url}
+    if b"<!DOCTYPE" in corpo.upper() or b"<!ENTITY" in corpo.upper():
+        return info  # descricao UPnP nao usa DOCTYPE; recusar evita os ataques de entidade do XML
+    try:
+        raiz = ET.fromstring(corpo)
+    except ET.ParseError:
+        return info
+    for el in raiz.iter():
+        tag = el.tag.split("}")[-1]
+        if tag == "friendlyName" and not info.get("nome"):
+            info["nome"] = (el.text or "").strip()
+        if tag == "manufacturer" and not info.get("fabricante"):
+            info["fabricante"] = (el.text or "").strip()
+        if tag == "service":
+            filhos = {f.tag.split("}")[-1]: (f.text or "").strip() for f in el}
+            if "RenderingControl" in filhos.get("serviceType", ""):
+                info["rc_url"] = urllib.parse.urljoin(local, filhos.get("controlURL", ""))
+                info["rc_tipo"] = filhos["serviceType"]
+    return info
+
+
+def classifica(a):
+    """Escolhe o melhor jeito de controlar: protocolo da marca > adb > DLNA/DIAL."""
+    tipos = set(a.get("tipos", []))
+    for porta, t in PORTAS.items():
+        if porta_aberta(a["ip"], porta):
+            tipos.add(t)
+            a.setdefault("portas", []).append(porta)
+    fab = (a.get("fabricante", "") + " " + a.get("servidor", "")).lower()
+    if "samsung" in fab:
+        tipos.add("samsung")
+    if "lg" in fab.split() or "webos" in fab:
+        tipos.add("lg")
+    for t in ("roku", "samsung", "lg", "android"):
+        if t in tipos:
+            a["tipo"] = t
+            break
+    else:
+        a["tipo"] = "dlna" if a.get("rc_url") else ("dial" if a.get("app_url") else (sorted(tipos)[0] if tipos else "desconhecido"))
+    a["tipos"] = sorted(tipos)
+    return a
+
+
+def procurar():
+    ip_origem = os.environ.get("CONTROLE_TV_ORIGEM", "")
+    achados = procura_ssdp(ip_origem=ip_origem)
+    tvs = []
+    for a in achados.values():
+        for local in sorted(a.pop("locais")):
+            for k, v in descricao(local).items():
+                if v and not a.get(k):
+                    a[k] = v
+        a["tipos"] = sorted(a["tipos"])
+        if not (a["tipos"] or a.get("rc_url") or a.get("app_url")):
+            continue  # roteador, impressora...: nao e TV
+        tvs.append(classifica(a))
+    grava_json("tvs.json", tvs)
+    return tvs
+
+
+def mostra(tvs):
+    if not tvs:
+        print("Nenhuma TV respondeu. A TV esta LIGADA e no MESMO Wi-Fi (ou no hotspot deste celular)? Algumas so aparecem com"
+              " 'Ligar via rede'/'Espelhamento' ativo nas configuracoes dela.")
+        return
+    for i, t in enumerate(tvs, 1):
+        print(f"{i}. {t.get('nome') or t.get('fabricante') or 'TV'} ({t['ip']}) tipo {t['tipo']}" + (f" [{', '.join(t['tipos'])}]" if t.get("tipos") else ""))
+
+
+def confere_certificado(ip, porta, der):
+    impressao = hashlib.sha256(der).hexdigest()
+    fixos = le_json("certificados.json", {})
+    chave = f"{ip}:{porta}"
+    if fixos.get(chave) and fixos[chave] != impressao:
+        raise Erro(f"o certificado da TV em {chave} MUDOU desde a 1a conexao: pode ser outro aparelho no lugar dela. "
+                   f"Se trocaram a TV, apague a linha {chave} de ~/.cache/controle-tv/certificados.json")
+    if not fixos.get(chave):
+        fixos[chave] = impressao
+        grava_json("certificados.json", fixos)
+
+
+# ------------------------------------------------------------------ WebSocket minimo (Samsung e LG)
+class Ws:
+    def __init__(self, url, tempo=6.0):
+        u = urllib.parse.urlsplit(url)
+        porta = u.port or (443 if u.scheme == "wss" else 80)
+        s = socket.create_connection((u.hostname, porta), timeout=tempo)
+        if u.scheme == "wss":
+            # TVs usam certificado proprio, sem cadeia: a verificacao normal falharia sempre. No lugar dela, o certificado
+            # e FIXADO na 1a conexao (impressao digital guardada) e uma troca depois e recusada (outro aparelho no IP).
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            s = ctx.wrap_socket(s, server_hostname=u.hostname)
+            confere_certificado(u.hostname, porta, s.getpeercert(binary_form=True) or b"")
+        self.s, self.buf = s, b""
+        caminho = u.path or "/"
+        if u.query:
+            caminho += "?" + u.query
+        chave = base64.b64encode(os.urandom(16)).decode()
+        s.sendall((f"GET {caminho} HTTP/1.1\r\nHost: {u.hostname}:{porta}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                   f"Sec-WebSocket-Key: {chave}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+        while b"\r\n\r\n" not in self.buf:
+            d = s.recv(4096)
+            if not d:
+                raise Erro("a TV fechou a conexao")
+            self.buf += d
+        cab, self.buf = self.buf.split(b"\r\n\r\n", 1)
+        if b" 101 " not in cab.split(b"\r\n", 1)[0]:
+            raise Erro("a TV recusou a conexao (" + cab.split(b"\r\n", 1)[0].decode("latin-1") + ")")
+
+    def _le(self, n):
+        while len(self.buf) < n:
+            d = self.s.recv(65536)
+            if not d:
+                raise Erro("a TV fechou a conexao")
+            self.buf += d
+        r, self.buf = self.buf[:n], self.buf[n:]
+        return r
+
+    def envia(self, texto):
+        d = texto.encode()
+        m = os.urandom(4)
+        n = len(d)
+        cab = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n))
+        self.s.sendall(cab + m + bytes(b ^ m[i % 4] for i, b in enumerate(d)))
+
+    def recebe(self):
+        while True:
+            b0, b1 = self._le(2)
+            n = b1 & 0x7F
+            if n == 126:
+                n = struct.unpack(">H", self._le(2))[0]
+            elif n == 127:
+                n = struct.unpack(">Q", self._le(8))[0]
+            m = self._le(4) if b1 & 0x80 else None
+            d = self._le(n)
+            if m:
+                d = bytes(b ^ m[i % 4] for i, b in enumerate(d))
+            if b0 & 0x0F == 0x8:
+                raise Erro("a TV encerrou (recusou o pedido na tela?)")
+            if b0 & 0x0F == 0x1:
+                return d.decode("utf-8", "replace")
+
+    def fecha(self):
+        try:
+            self.s.close()
+        except OSError:
+            pass
+
+
+# ------------------------------------------------------------------ marcas
+def roku(tv, tecla):
+    if tecla in ROKU_APPS:
+        caminho = f"/launch/{ROKU_APPS[tecla]}"
+    elif tecla in ROKU:
+        caminho = f"/keypress/{ROKU[tecla]}"
+    else:
+        raise Erro(f"a Roku nao tem '{tecla}'")
+    c = http.client.HTTPConnection(tv["ip"], int(tv.get("porta_roku", 8060)), timeout=TEMPO)
+    try:
+        c.request("POST", caminho, body=b"")
+        if c.getresponse().status >= 300:
+            raise Erro("a Roku recusou (Configuracoes > Sistema > Controle por apps moveis: Permitido)")
+    finally:
+        c.close()
+
+
+def samsung(tv, teclas):
+    tokens = le_json("chaves.json", {})
+    nome = base64.b64encode(NOME_APP.encode()).decode()
+    porta = int(tv.get("porta_samsung", 8002 if porta_aberta(tv["ip"], 8002) else 8001))
+    esquema = "wss" if porta == 8002 else "ws"
+    url = f"{esquema}://{tv['ip']}:{porta}/api/v2/channels/samsung.remote.control?name={nome}"
+    if tokens.get(tv["ip"]):
+        url += "&token=" + tokens[tv["ip"]]
+    ws = Ws(url, tempo=30)  # na 1a vez a TV mostra "Permitir": espera o Rafael tocar
+    try:
+        r = json.loads(ws.recebe())
+        if r.get("event") != "ms.channel.connect":
+            raise Erro("a TV Samsung nao aceitou (toque em Permitir na TV)")
+        tk = (r.get("data") or {}).get("token")
+        if tk:
+            tokens[tv["ip"]] = tk
+            grava_json("chaves.json", tokens)
+        for t in teclas:
+            if t in SAMSUNG_APPS:
+                ws.envia(json.dumps({"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host",
+                                     "data": {"appId": SAMSUNG_APPS[t], "action_type": "DEEP_LINK"}}}))
+            elif t in SAMSUNG:
+                ws.envia(json.dumps({"method": "ms.remote.control", "params": {"Cmd": "Click", "DataOfCmd": SAMSUNG[t],
+                                     "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
+            else:
+                raise Erro(f"a Samsung nao tem '{t}' pela rede")
+            time.sleep(0.25)
+    finally:
+        ws.fecha()
+
+
+LG_MANIFESTO = {"manifestVersion": 1, "appVersion": "1.1", "signed": {"appId": "br.embeeded.controle", "vendorId": "br.embeeded",
+                "localizedAppNames": {"": NOME_APP}, "permissions": ["CONTROL_POWER", "CONTROL_AUDIO", "CONTROL_INPUT_TV",
+                "CONTROL_INPUT_MEDIA_PLAYBACK", "LAUNCH", "CONTROL_MOUSE_AND_KEYBOARD", "READ_INSTALLED_APPS"], "serial": "1"},
+                "permissions": ["LAUNCH", "CONTROL_AUDIO", "CONTROL_POWER", "CONTROL_INPUT_TV", "CONTROL_INPUT_MEDIA_PLAYBACK",
+                "CONTROL_MOUSE_AND_KEYBOARD", "READ_INSTALLED_APPS"], "signatures": [{"signatureVersion": 1, "signature": ""}]}
+
+
+def lg(tv, teclas):
+    chaves = le_json("chaves.json", {})
+    porta = int(tv.get("porta_lg", 3001 if porta_aberta(tv["ip"], 3001) else 3000))
+    ws = Ws(f"{'wss' if porta == 3001 else 'ws'}://{tv['ip']}:{porta}/", tempo=30)
+    try:
+        reg = {"forcePairing": False, "pairingType": "PROMPT", "manifest": LG_MANIFESTO}
+        if chaves.get(tv["ip"]):
+            reg["client-key"] = chaves[tv["ip"]]
+        ws.envia(json.dumps({"type": "register", "id": "reg0", "payload": reg}))
+        while True:  # 1a vez: "response" (pedido na tela) e depois "registered" quando o Rafael aceita
+            r = json.loads(ws.recebe())
+            if r.get("type") == "registered":
+                ck = (r.get("payload") or {}).get("client-key")
+                if ck:
+                    chaves[tv["ip"]] = ck
+                    grava_json("chaves.json", chaves)
+                break
+            if r.get("type") == "error":
+                raise Erro("a TV LG recusou (aceite o pedido na tela da TV)")
+        ponteiro = None
+        for n, t in enumerate(teclas):
+            if t == "mudo":
+                ws.envia(json.dumps({"type": "request", "id": f"m{n}", "uri": "ssap://audio/getStatus"}))
+                st = json.loads(ws.recebe()).get("payload", {})
+                ws.envia(json.dumps({"type": "request", "id": f"r{n}", "uri": "ssap://audio/setMute", "payload": {"mute": not st.get("mute", False)}}))
+                ws.recebe()
+            elif t in LG_SSAP:
+                uri, carga = LG_SSAP[t]
+                ws.envia(json.dumps({"type": "request", "id": f"r{n}", "uri": uri, **({"payload": carga} if carga else {})}))
+                ws.recebe()
+            elif t in LG_BOTAO:
+                if ponteiro is None:
+                    ws.envia(json.dumps({"type": "request", "id": "p0", "uri": "ssap://com.webos.service.networkinput/getPointerInputSocket"}))
+                    caminho = json.loads(ws.recebe()).get("payload", {}).get("socketPath", "")
+                    if not caminho:
+                        raise Erro("a TV LG nao abriu o canal das setas")
+                    ponteiro = Ws(caminho)
+                ponteiro.envia(f"type:button\nname:{LG_BOTAO[t]}\n\n")
+            else:
+                raise Erro(f"a LG nao tem '{t}' pela rede")
+            time.sleep(0.2)
+        if ponteiro:
+            ponteiro.fecha()
+    finally:
+        ws.fecha()
+
+
+def android(tv, teclas):
+    alvo = f"{tv['ip']}:5555"
+    subprocess.Popen(["adb", "connect", alvo], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).wait(15)
+    for t in teclas:
+        if t in DIAL_APPS:
+            pac = {"netflix": "com.netflix.ninja", "youtube": "com.google.android.youtube.tv"}[t]
+            cmd = ["adb", "-s", alvo, "shell", "monkey", "-p", pac, "-c", "android.intent.category.LEANBACK_LAUNCHER", "1"]
+        elif t in ANDROID:
+            cmd = ["adb", "-s", alvo, "shell", "input", "keyevent", ANDROID[t]]
+        else:
+            raise Erro(f"a Android TV nao tem '{t}'")
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        _, err = p.communicate(timeout=20)
+        if p.returncode != 0:
+            raise Erro("a Android TV nao aceitou (Depuracao USB/rede ligada nela e aceite o aviso na tela)")
+
+
+def soap(url, tipo, acao, args):
+    corpo = (f'<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
+             f's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:{acao} xmlns:u="{tipo}">'
+             + "".join(f"<{k}>{v}</{k}>" for k, v in args) + f"</u:{acao}></s:Body></s:Envelope>").encode()
+    u = urllib.parse.urlsplit(url)
+    c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=TEMPO)
+    try:
+        c.request("POST", u.path or "/", body=corpo, headers={"Content-Type": 'text/xml; charset="utf-8"', "SOAPACTION": f'"{tipo}#{acao}"'})
+        r = c.getresponse()
+        texto = r.read().decode("utf-8", "replace")
+        if r.status >= 300:
+            raise Erro(f"a TV recusou {acao} (DLNA {r.status})")
+        return texto
+    finally:
+        c.close()
+
+
+def dlna(tv, tecla):
+    url, tipo = tv.get("rc_url"), tv.get("rc_tipo", "urn:schemas-upnp-org:service:RenderingControl:1")
+    if not url:
+        raise Erro("esta TV nao tem controle de volume pela rede (DLNA)")
+    base = [("InstanceID", "0"), ("Channel", "Master")]
+    if tecla in ("volume+", "volume-"):
+        atual = int(re.search(r"<CurrentVolume>(\d+)</CurrentVolume>", soap(url, tipo, "GetVolume", base)).group(1))
+        novo = max(0, min(100, atual + (5 if tecla == "volume+" else -5)))
+        soap(url, tipo, "SetVolume", base + [("DesiredVolume", str(novo))])
+        print(f"volume {atual} -> {novo}")
+    elif tecla == "mudo":
+        mudo = re.search(r"<CurrentMute>(\d)</CurrentMute>", soap(url, tipo, "GetMute", base)).group(1) == "1"
+        soap(url, tipo, "SetMute", base + [("DesiredMute", "0" if mudo else "1")])
+    else:
+        raise Erro(f"pelo DLNA so ha volume e mudo (pedido: {tecla})")
+
+
+def dial(tv, tecla):
+    base = tv.get("app_url")
+    if not base or tecla not in DIAL_APPS:
+        raise Erro("esta TV so abre YouTube/Netflix pelo DIAL")
+    url = base.rstrip("/") + "/" + DIAL_APPS[tecla]
+    u = urllib.parse.urlsplit(url)
+    c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=TEMPO)
+    try:
+        c.request("POST", u.path, body=b"", headers={"Content-Type": "text/plain; charset=utf-8"})
+        if c.getresponse().status >= 300:
+            raise Erro(f"a TV nao abriu {DIAL_APPS[tecla]}")
+    finally:
+        c.close()
+
+
+def wol(tv):
+    mac = (tv.get("mac") or "").replace(":", "").replace("-", "")
+    if not re.fullmatch(r"[0-9A-Fa-f]{12}", mac):
+        raise Erro("ligar pela rede so com o MAC guardado e a TV com 'Ligar via rede/Wi-Fi' ativo; desligada de vez, so o botao")
+    pacote = b"\xff" * 6 + bytes.fromhex(mac) * 16
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    s.sendto(pacote, ("255.255.255.255", 9))
+    s.close()
+
+
+# ------------------------------------------------------------------ comandos
+def expande(args):
+    teclas = []
+    for a in args:
+        m = re.fullmatch(r"(.+?)x(\d{1,2})", a)
+        nome, vezes = (m.group(1), int(m.group(2))) if m else (a, 1)
+        if nome not in TECLAS:
+            raise Erro(f"tecla desconhecida: {a} (veja: controle-tv teclas)")
+        teclas += [nome] * min(vezes, 30)
+    return teclas
+
+
+def escolhe(alvo):
+    tvs = le_json("tvs.json", [])
+    if alvo is None:
+        ult = le_json("ultima.json", {})
+        if ult.get("ip"):
+            return next((t for t in tvs if t["ip"] == ult["ip"]), ult)
+        if len(tvs) == 1:
+            return tvs[0]
+        raise Erro("diga qual TV (numero da lista ou IP); rode antes: controle-tv procurar")
+    if re.fullmatch(r"\d{1,2}", alvo):
+        n = int(alvo)
+        if not 1 <= n <= len(tvs):
+            raise Erro("numero fora da lista (controle-tv lista)")
+        return tvs[n - 1]
+    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", alvo):
+        t = next((t for t in tvs if t["ip"] == alvo), None)
+        return t or classifica({"ip": alvo, "tipos": []})
+    raise Erro("alvo invalido: use o numero da lista ou o IP")
+
+
+def manda(tv, teclas):
+    tipo = tv.get("tipo")
+    if "ligar" in teclas and tipo != "roku" and tipo != "android":
+        wol(tv)
+        teclas = [t for t in teclas if t != "ligar"]
+    if not teclas:
+        return
+    if tipo == "roku":
+        for t in teclas:
+            roku(tv, t)
+            time.sleep(0.15)
+    elif tipo == "samsung":
+        samsung(tv, teclas)
+    elif tipo == "lg":
+        lg(tv, teclas)
+    elif tipo == "android":
+        android(tv, teclas)
+    elif tipo in ("dlna", "dial"):
+        for t in teclas:
+            dial(tv, t) if t in DIAL_APPS and tv.get("app_url") else dlna(tv, t)
+    else:
+        raise Erro(f"nao sei controlar esta TV ({tipo}); portas abertas: {tv.get('portas', [])}")
+
+
+def main(argv=None):
+    a = list(sys.argv[1:] if argv is None else argv)
+    if not a or a[0] in ("-h", "--help", "ajuda"):
+        print(__doc__.split("\n\n")[0] + "\n" + __doc__.split("\n\n")[1])
+        return 0 if a else 2
+    try:
+        if a[0] == "procurar":
+            mostra(procurar())
+            return 0
+        if a[0] == "lista":
+            mostra(le_json("tvs.json", []))
+            return 0
+        if a[0] == "teclas":
+            print(" ".join(TECLAS))
+            return 0
+        alvo = a[0] if re.fullmatch(r"\d{1,2}|\d{1,3}(\.\d{1,3}){3}", a[0]) else None
+        teclas = expande(a[1:] if alvo else a)
+        if not teclas:
+            print("diga a tecla (controle-tv teclas)")
+            return 2
+        tv = escolhe(alvo)
+        manda(tv, teclas)
+        grava_json("ultima.json", {"ip": tv["ip"], "tipo": tv.get("tipo")})
+        print(f"ok: {' '.join(teclas)} -> {tv.get('nome') or tv['ip']} ({tv.get('tipo')})")
+        return 0
+    except Erro as e:
+        print("Nao deu:", e)
+        return 1 if "desconhecida" not in str(e) and "invalido" not in str(e) else 2
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError) as e:
+        print("Nao deu: a TV nao respondeu (" + type(e).__name__ + "). Ligada e na mesma rede?")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

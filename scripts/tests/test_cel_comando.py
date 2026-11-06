@@ -392,3 +392,11 @@ def test_obs_sem_pc_explica_e_uso_errado_nao_chama(cel):
     assert rc == 1 and "PC nao respondeu" in s
     rc, s = cel.roda("obs", "apagar-tudo")
     assert rc == 2 and "/mcp" not in cel.registro().split("apagar-tudo")[-1]
+
+
+def test_enviar_pc_recusa_fora_do_armazenamento_e_nome_perigoso(cel):
+    _conectado(cel)
+    assert cel.roda("enviar-pc")[0] == 2
+    rc, s = cel.roda("enviar-pc", "/data/data/com.termux/files/home/segredo.txt", "/sdcard/a;rm.jpg")
+    assert "So arquivo do armazenamento" in s and "caractere perigoso" in s
+    assert "ShareActivity" not in cel.registro()
