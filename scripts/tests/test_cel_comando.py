@@ -58,8 +58,9 @@ def cel(tmp_path):
         (bin_ / nome).chmod(0o755)
     log = tmp_path / "log"
 
-    def roda(*args):
+    def roda(*args, extra=None):
         env = {"HOME": str(home), "PATH": f"{bin_}:/usr/bin:/bin", "FALSO_LOG": str(log), "FALSO_DIR": str(tmp_path)}
+        env.update(extra or {})
         p = subprocess.Popen(["/bin/bash", str(SCRIPT), *args], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         saida, _ = p.communicate(timeout=60)
         return p.returncode, saida
@@ -374,7 +375,7 @@ def _ponte_obs(cel):
 
 @pytest.mark.parametrize("sub,acao", [("camera", "obs-camera-ligar"), ("frontal", "obs-camera-frontal"), ("tela", "obs-tela-ligar"),
                                       ("gravar", "obs-gravar-camera"), ("gravar-tela", "obs-gravar-tela"),
-                                      ("parar-gravacao", "obs-parar-gravacao"), ("desligar", "obs-desligar"), ("status", "obs-status"),
+                                      ("parar-gravacao", "obs-parar-gravacao"), ("desligar", "obs-desligar"), ("status", "obs-status"), ("verificar", "obs-verificar"),
                                       ("live", "obs-live-iniciar"), ("parar-live", "obs-live-parar")])
 def test_obs_pede_a_acao_certa_ao_pc_e_mostra_a_saida(cel, sub, acao):
     _ponte_obs(cel)
@@ -418,3 +419,116 @@ def test_nunca_deixa_o_celular_sem_internet(cel):
     assert rc == 3 and "airplane-mode enable" not in cel.registro()
     (cel.dir / "sem_wifi").unlink()
     assert cel.roda("dados", "desligar")[0] == 0 and "svc data disable" in cel.registro()
+
+
+# ---- cel viagem (06/11): FadCam grava em segundo plano no cartao, Organic Maps na tela, calor so AVISA
+AM_FADCAM = r"""#!/bin/bash
+echo "am $*" >> "$FALSO_LOG"
+case "$*" in
+  *RecordingStartActivity*)
+    [ -f "$FALSO_DIR/fadcam_falha" ] && exit 0
+    printf 'x%.0s' $(seq 1 1100) > "$VIAGEM_PASTA/FadCam_20261106_100000.mp4"   # o arquivo vazio (~1 KB) que o FadCam cria
+    f="$VIAGEM_PASTA/FadCam_20261106_100001.mp4"; : > "$f"; touch "$FALSO_DIR/gravando"
+    ( while [ -f "$FALSO_DIR/gravando" ]; do printf 'xxxxxxxxxxxxxxxx' >> "$f"; done ) >/dev/null 2>&1 &
+    ;;
+  *RecordingStopActivity*) rm -f "$FALSO_DIR/gravando" ;;
+esac
+exit 0
+"""
+EXTRAS_TERMUX = {
+    "termux-notification": '#!/bin/bash\necho "notif $*" >> "$FALSO_LOG"\n',
+    "termux-notification-remove": '#!/bin/bash\necho "notif-remove $*" >> "$FALSO_LOG"\n',
+    "termux-vibrate": '#!/bin/bash\necho "vibra $*" >> "$FALSO_LOG"\n',
+    "termux-battery-status": '#!/bin/bash\necho "{\\"temperature\\": $(cat "$FALSO_DIR/temp" 2>/dev/null || echo 30.0)}"\n',
+}
+
+
+@pytest.fixture
+def viagem(cel):
+    pasta = cel.dir / "Viagens"
+    pasta.mkdir()
+    for nome, texto in {"am": AM_FADCAM, **EXTRAS_TERMUX}.items():
+        (cel.dir / "bin" / nome).write_text(texto)
+        (cel.dir / "bin" / nome).chmod(0o755)
+    extra = {"VIAGEM_PASTA": str(pasta)}
+    yield types.SimpleNamespace(cel=cel, pasta=pasta, roda=lambda *a: cel.roda(*a, extra=extra))
+    (cel.dir / "gravando").unlink(missing_ok=True)
+    (cel.dir / "home" / ".cache" / "viagem" / "ligada").unlink(missing_ok=True)
+
+
+def test_viagem_sem_am_ensina_a_instalar(cel):
+    (cel.dir / "bin" / "am").unlink()
+    rc, s = cel.roda("viagem", "iniciar")
+    assert rc == 1 and "pkg install termux-am" in s
+
+
+def test_viagem_iniciar_abre_o_fadcam_antes_grava_e_abre_o_mapa(viagem):
+    rc, s = viagem.roda("viagem", "iniciar")
+    assert rc == 0, s
+    reg = viagem.cel.registro()
+    # o FadCam frio trava se mandar gravar na hora: abre o app ANTES do comando de gravar
+    assert reg.index("com.fadcam/.SplashActivity") < reg.index("RecordingStartActivity") < reg.index("app.organicmaps")
+    assert "Gravando a viagem" in s and "so AVISO" in s
+    assert "notif" in reg and "Parar" in reg and "viagem parar" in reg
+    assert "GRAVANDO" in viagem.roda("viagem", "status")[1]
+    assert "Ja esta gravando" in viagem.roda("viagem", "iniciar")[1]  # nao abre de novo por cima
+    rc, s = viagem.roda("viagem", "parar")
+    assert rc == 0 and "Gravacao parada" in s and "RecordingStopActivity" in viagem.cel.registro()
+    nomes = sorted(p.name for p in viagem.pasta.iterdir())
+    assert nomes == ["FadCam_20261106_100001.mp4"]  # o arquivo vazio de ~1 KB sumiu; o video ficou
+    assert "Nao esta gravando" in viagem.roda("viagem", "status")[1]
+
+
+def test_viagem_sem_mapa_nao_abre_o_organic_maps(viagem):
+    assert viagem.roda("viagem", "iniciar", "--sem-mapa")[0] == 0
+    assert "organicmaps" not in viagem.cel.registro()
+    viagem.roda("viagem", "parar")
+
+
+def test_viagem_que_nao_comecou_explica_e_nao_vigia(viagem):
+    (viagem.cel.dir / "fadcam_falha").write_text("")
+    rc, s = viagem.roda("viagem", "iniciar")
+    assert rc == 1 and "NAO comecou" in s and "Fechar app" in s
+    assert not (viagem.cel.dir / "home" / ".cache" / "viagem" / "ligada").exists()
+
+
+def test_viagem_sem_pasta_no_cartao(cel):
+    (cel.dir / "bin" / "am").write_text(AM_FADCAM)
+    (cel.dir / "bin" / "am").chmod(0o755)
+    rc, s = cel.roda("viagem", "iniciar", extra={"VIAGEM_PASTA": str(cel.dir / "nao-existe")})
+    assert rc == 1 and "cartao SD" in s and "SplashActivity" not in cel.registro()
+
+
+def test_viagem_vigia_so_avisa_o_calor_e_avisa_quando_a_gravacao_para(viagem):
+    vg = viagem.cel.dir / "home" / ".cache" / "viagem"
+    vg.mkdir(parents=True, exist_ok=True)
+    (vg / "ligada").write_text("")
+    (viagem.cel.dir / "temp").write_text("46.2")
+    rc, _ = viagem.roda("viagem", "vigiar")  # nada gravando: avisa o calor, percebe a parada em 2 voltas e sai
+    reg = viagem.cel.registro()
+    assert rc == 0 and "Celular QUENTE: 46 C" in reg and "Nada foi fechado" in reg and "vibra" in reg
+    assert "PAROU" in reg and not (vg / "ligada").exists()
+    assert "RecordingStopActivity" not in reg and "force-stop" not in reg  # nunca fecha nada sozinho
+
+
+def test_viagem_vigia_atencao_sem_vibrar(viagem):
+    vg = viagem.cel.dir / "home" / ".cache" / "viagem"
+    vg.mkdir(parents=True, exist_ok=True)
+    (vg / "ligada").write_text("")
+    (viagem.cel.dir / "temp").write_text("43")
+    viagem.roda("viagem", "vigiar")
+    reg = viagem.cel.registro()
+    assert "esquentando: 43 C" in reg and "QUENTE" not in reg
+
+
+def test_viagem_lanterna_nao_mexe_no_fadcam_e_explica(viagem):
+    rc, s = viagem.roda("viagem", "lanterna")
+    assert rc == 1 and "trava" in s and "TOGGLE_TORCH" not in viagem.cel.registro()  # 06/11: apagar travou o FadCam
+    assert viagem.roda("viagem", "talvez")[0] == 2
+
+
+def test_lanterna_ocupada_ensina_a_do_fadcam(cel):
+    (cel.dir / "bin" / "termux-torch").write_text("#!/bin/bash\nexit 1\n")
+    (cel.dir / "bin" / "termux-torch").chmod(0o755)
+    rc, s = cel.roda("lanterna", "ligar")
+    assert rc == 1 and "lanterna segura" in s

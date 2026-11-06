@@ -8,6 +8,7 @@
 #   cel economia-dados ligar|desligar|status   Economia de dados do Android (sem dado em segundo plano no 4G; nao comprime)
 #   cel acordado ligar|desligar|status         Permanecer acordado enquanto carrega (tela nao apaga no cabo)
 #   cel lanterna ligar|desligar                Lanterna (Termux:API; funciona sem a depuracao sem fio)
+#   cel viagem iniciar|parar|status            camera de viagem: FadCam grava em 2o plano no cartao, mapa na tela, calor so avisa
 #   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados em segundo plano
 #   cel abrir TELA | cel telas      abre a tela de configuracao (wifi, bluetooth, tela, som, bateria, apps, armazenamento, desenvolvedor...)
 #   cel abrir-app PACOTE · cel apps [texto] · cel procurar TEXTO (arquivos, apps e configuracoes)
@@ -383,9 +384,87 @@ case "${1:-status}" in
   lanterna) # Lanterna pelo Termux:API (nao precisa da depuracao sem fio)
     command -v termux-torch >/dev/null 2>&1 || { echo "Falta o termux-torch (pkg install termux-api e o app Termux:API)."; exit 1; }
     case "${2:-}" in
-      ligar) termux-torch on && echo "Lanterna ligada (desligar: cel lanterna desligar)." ;;
+      ligar) termux-torch on && echo "Lanterna ligada (desligar: cel lanterna desligar)." || { echo "Nao liguei: a camera deve estar em uso (gravando video?). Com a gravacao do FadCam ligada nao ha lanterna segura (cel viagem lanterna explica)."; exit 1; } ;;
       desligar) termux-torch off && echo "Lanterna desligada." ;;
       *) echo "Use: cel lanterna ligar|desligar"; exit 2 ;;
+    esac ;;
+  viagem) # camera de viagem (06/11): o FadCam grava em SEGUNDO PLANO no cartao e o Organic Maps fica na tela; o calor so AVISA
+    VG="$HOME/.cache/viagem"; mkdir -p "$VG"
+    SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+    # o Termux nao lista /storage; o cartao aparece nas montagens (06/11: /storage/1A2B-3C4D)
+    PASTA="${VIAGEM_PASTA:-$(grep -o ' /storage/[0-9A-F][0-9A-F]*-[0-9A-F][0-9A-F]*' /proc/self/mounts 2>/dev/null | head -1 | tr -d ' ')/Viagens}"
+    command -v am >/dev/null 2>&1 || { echo "Falta o am do Termux: pkg install termux-am (e o Termux com 'Sobrepor a outros apps')."; exit 1; }
+    ultimo() { ls -t "$PASTA"/FadCam_*.mp4 2>/dev/null | head -1; }
+    tam() { local f; f=$(ultimo); [ -n "$f" ] && wc -c < "$f" 2>/dev/null || echo 0; }
+    crescendo() { local a b; a=$(tam); sleep "${VIAGEM_OLHA:-3}"; b=$(tam); [ "$b" -gt "$a" ]; }
+    temperatura() { termux-battery-status 2>/dev/null | python3 -c 'import json,sys; print(int(float(json.load(sys.stdin)["temperature"])))' 2>/dev/null; }
+    aviso() { # $1 id, $2 titulo, $3 texto, resto = opcoes extras
+      command -v termux-notification >/dev/null 2>&1 || return 0
+      local id=$1 t=$2 x=$3; shift 3
+      termux-notification --id "$id" --title "$t" --content "$x" "$@" >/dev/null 2>&1
+    }
+    case "${2:-status}" in
+      iniciar|ligar|gravar)
+        [ -n "$PASTA" ] && [ -d "$PASTA" ] || { echo "Nao achei a pasta Viagens no cartao SD (o cartao esta no celular?)."; exit 1; }
+        if crescendo; then echo "Ja esta gravando: $(basename "$(ultimo)")."; exit 0; fi
+        am start -n com.fadcam/.SplashActivity >/dev/null 2>&1 || { echo "Nao abri o FadCam (instalado?)."; exit 1; }
+        sleep "${VIAGEM_ESPERA:-7}"  # o FadCam frio TRAVA se mandar gravar na hora (06/11: ForegroundServiceDidNotStartInTime)
+        am start -n com.fadcam/.RecordingStartActivity >/dev/null 2>&1
+        sleep "${VIAGEM_ESPERA2:-5}"
+        [ "${3:-}" = "--sem-mapa" ] || am start -n app.organicmaps/.DownloadResourcesActivity >/dev/null 2>&1
+        if ! crescendo; then
+          echo "A gravacao NAO comecou. Abra o FadCam e toque em Start (se aparecer 'o app apresenta falhas', toque em Fechar app e tente de novo)."
+          exit 1
+        fi
+        : > "$VG/ligada"
+        nohup bash "$SELF" viagem vigiar >/dev/null 2>&1 </dev/null &
+        echo $! > "$VG/vigia.pid"
+        aviso viagem "Gravando a viagem" "FadCam no cartao (pasta Viagens). Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
+        echo "Gravando a viagem no cartao ($PASTA), em segundo plano; o mapa ficou na tela. Parar: cel viagem parar (ou Stop no aviso do FadCam)."
+        echo "Calor: so AVISO (nada e fechado)."
+        ;;
+      parar)
+        rm -f "$VG/ligada"
+        am start -n com.fadcam/.RecordingStopActivity >/dev/null 2>&1
+        p=$(cat "$VG/vigia.pid" 2>/dev/null); case "$p" in ''|*[!0-9]*) ;; *) kill "$p" 2>/dev/null ;; esac; rm -f "$VG/vigia.pid"
+        command -v termux-notification-remove >/dev/null 2>&1 && { termux-notification-remove viagem; termux-notification-remove viagem-calor; } >/dev/null 2>&1
+        sleep "${VIAGEM_OLHA:-3}"
+        # o comando de comecar cria um arquivo vazio (~1 KB) ao lado do video: so esses somem
+        find "$PASTA" -maxdepth 1 -name 'FadCam_*.mp4' -size -4k -delete 2>/dev/null
+        n=$(ls "$PASTA"/FadCam_*.mp4 2>/dev/null | wc -l)
+        echo "Gravacao parada. Videos na pasta Viagens do cartao: $n (os mais novos por ultimo: ls -t)."
+        ;;
+      status)
+        if crescendo; then echo "GRAVANDO: $(basename "$(ultimo)") ($(( $(tam) / 1048576 )) MB nesta parte; partes de ~500 MB, ~5 min)."
+        else echo "Nao esta gravando. Comecar: cel viagem iniciar"; fi
+        t=$(temperatura); [ -n "$t" ] && echo "Temperatura da bateria: $t C (aviso a partir de ${VIAGEM_ATENCAO:-42} C; nada e fechado)."
+        livre=$(df -h "$PASTA" 2>/dev/null | awk 'NR==2 {print $4}'); [ -n "$livre" ] && echo "Livre no cartao: $livre."
+        ;;
+      lanterna) # 06/11, testado no A12: o "alternar lanterna" do FadCam ACENDE, mas o segundo (apagar) TRAVA o FadCam e a gravacao para
+        echo "Com a gravacao ligada nao ha lanterna segura: o FadCam acende, mas ao apagar ele trava e a gravacao para (testado 06/11)."
+        echo "A noite o flash so reflete no para-brisa. Se precisar mesmo de luz: cel viagem parar, cel lanterna ligar."
+        exit 1 ;;
+      vigiar) # (interno) a cada minuto: temperatura e se a gravacao segue; so AVISA, nunca fecha app
+        parado=0
+        while [ -f "$VG/ligada" ]; do
+          t=$(temperatura)
+          if [ -n "$t" ] && [ "$t" -ge "${VIAGEM_QUENTE:-45}" ]; then
+            aviso viagem-calor "Celular QUENTE: $t C" "Nada foi fechado. Se puder: tire do sol, afaste do ar quente, use carregador fraco." --priority high
+            command -v termux-vibrate >/dev/null 2>&1 && termux-vibrate -d 600 >/dev/null 2>&1
+          elif [ -n "$t" ] && [ "$t" -ge "${VIAGEM_ATENCAO:-42}" ]; then
+            aviso viagem-calor "Celular esquentando: $t C" "So aviso: a gravacao e o mapa seguem."
+          fi
+          if crescendo; then parado=0; else parado=$((parado + 1)); fi
+          if [ "$parado" -ge 2 ]; then
+            rm -f "$VG/ligada"
+            aviso viagem "A gravacao da viagem PAROU" "Pelo Stop ou por falha do FadCam. Gravar de novo: cel viagem iniciar" --priority high
+            command -v termux-vibrate >/dev/null 2>&1 && termux-vibrate -d 300 >/dev/null 2>&1
+            break
+          fi
+          sleep "${VIAGEM_INTERVALO:-60}"
+        done
+        ;;
+      *) echo "Use: cel viagem iniciar [--sem-mapa]|parar|status"; exit 2 ;;
     esac ;;
   acordado) # Permanecer acordado: a tela nao apaga enquanto carrega (7 = cabo, carregador e sem fio; 0 = normal)
     case "${2:-status}" in
@@ -450,7 +529,8 @@ case "${1:-status}" in
       camera) a=obs-camera-ligar ;; frontal) a=obs-camera-frontal ;; tela) a=obs-tela-ligar ;;
       gravar) a=obs-gravar-camera ;; gravar-tela) a=obs-gravar-tela ;; parar-gravacao) a=obs-parar-gravacao ;;
       desligar) a=obs-desligar ;; status) a=obs-status ;; live) a=obs-live-iniciar ;; parar-live) a=obs-live-parar ;;
-      *) echo "Use: cel obs camera|frontal|tela|gravar|gravar-tela|parar-gravacao|desligar|status|live|parar-live"; exit 2 ;;
+      verificar|faixa) a=obs-verificar ;;
+      *) echo "Use: cel obs camera|frontal|tela|gravar|gravar-tela|parar-gravacao|desligar|status|live|parar-live|verificar"; exit 2 ;;
     esac
     r=$(pede_ao_pc_saida "$a") || { echo "O PC nao respondeu (ligado? Tailscale? ponte no ar? teste: ia status)."; exit 1; }
     printf '%s\n' "$r" ;;
@@ -515,5 +595,5 @@ case "${1:-status}" in
     esac
     precisa; sh_ "input keyevent $k"; echo "Tecla ${2} enviada." ;;
   sh) shift; [ $# -gt 0 ] || { echo "Use: cel sh \"comando\""; exit 2; }; precisa; sh_ "$*" ;;
-  *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

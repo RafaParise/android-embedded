@@ -46,6 +46,7 @@ class FalsoObs:
     def __init__(self):
         self.estado = {"vcam": False, "rec": False, "cena": "1 Jogo", "pasta": "C:/nao/existe"}
         self.pedidos = []
+        self.dados = []
         self.s = socket.socket()
         self.s.bind(("127.0.0.1", 0))
         self.s.listen(5)
@@ -79,6 +80,7 @@ class FalsoObs:
             while True:
                 r = le_quadro(c)["d"]
                 self.pedidos.append(r["requestType"])
+                self.dados.append((r["requestType"], r.get("requestData", {})))
                 envia(c, {"op": 7, "d": {"requestId": r["requestId"], **self.responde(r["requestType"], r.get("requestData", {}))}})
         except (ConnectionError, OSError, IndexError):
             pass
@@ -91,8 +93,10 @@ class FalsoObs:
             "GetVirtualCamStatus": {"outputActive": e["vcam"]}, "GetRecordStatus": {"outputActive": e["rec"], "outputTimecode": "00:00:05"},
             "GetStreamStatus": {"outputActive": False}, "GetCurrentProgramScene": {"currentProgramSceneName": e["cena"]},
             "GetSceneList": {"scenes": [{"sceneName": "1 Jogo"}, {"sceneName": "2 Jogo com Webcam"}, {"sceneName": "3 Só Webcam"}]},
-            "GetSceneItemList": {"sceneItems": [{"sourceName": "Webcam do Celular"}] if "Webcam" in dados.get("sceneName", "") else [{"sourceName": "Jogo"}]},
+            "GetSceneItemList": {"sceneItems": [{"sourceName": "Webcam do Celular", "sceneItemId": 7}, {"sourceName": "Som do celular", "sceneItemId": 8}]
+                                 if "Webcam" in dados.get("sceneName", "") else [{"sourceName": "Jogo", "sceneItemId": 1}]},
             "GetRecordDirectory": {"recordDirectory": e["pasta"]}, "GetVersion": {"obsVersion": "32", "obsWebSocketVersion": "5"},
+            "GetVideoSettings": {"baseWidth": 1920, "baseHeight": 1080},
         }
         if t == "StartVirtualCam":
             e["vcam"] = True
@@ -180,3 +184,21 @@ def test_obs_fechado_e_config_desligada(oc, tmp_path):
 def test_uso_errado_nao_conecta(oc, capsys):
     assert oc.main(["gravar", "apagar"]) == 2
     assert oc.main(["formatar"]) == 2
+
+
+def test_encaixa_ocupa_a_tela_inteira_e_corta_a_tarja(oc, falso):
+    falso.estado["cena"] = "3 Só Webcam"
+    with oc.Obs(falso.porta, PALAVRA) as o:
+        cena, tam, feitos = oc.encaixa(o, (0, 90, 0, 90))
+    assert cena == "3 Só Webcam" and tam == (1920, 1080) and feitos == ["Webcam do Celular"]  # o som nao e mexido
+    envios = [d for tp, d in falso.dados if tp == "SetSceneItemTransform"]
+    assert len(envios) == 1 and envios[0]["sceneItemId"] == 7
+    tr = envios[0]["sceneItemTransform"]
+    assert tr["boundsType"] == "OBS_BOUNDS_SCALE_OUTER" and (tr["boundsWidth"], tr["boundsHeight"]) == (1920.0, 1080.0)
+    assert (tr["cropTop"], tr["cropBottom"], tr["cropLeft"], tr["cropRight"]) == (90, 90, 0, 0) and tr["positionX"] == 0.0
+
+
+def test_encaixa_sem_fonte_do_celular_nao_mexe_em_nada(oc, falso):
+    with oc.Obs(falso.porta, PALAVRA) as o:  # cena "1 Jogo": so o jogo
+        assert oc.encaixa(o)[2] == []
+    assert "SetSceneItemTransform" not in falso.pedidos

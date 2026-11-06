@@ -4,6 +4,8 @@
 # navegador, notebook no Wi-Fi da SEDUC, celular de qualquer modelo.
 #   link tela [--minutos N] [--local]          a tela do ScreenStream (inicie a transmissao no app antes)
 #   link tela --som [--minutos N] [--local]    a tela COM SOM (ScreenStream no modo RTSP + ffmpeg do Termux)
+#   link tela --preencher                      tela CHEIA em quem assiste: o celular desenha na proporcao da tela dele
+#                                              (como o segunda-tela do PC; volta ao normal no link parar). Gire o celular deitado.
 #   link arquivo CAMINHO... [--minutos N] [--local]   um ou mais arquivos (fotos, PDF, video, APK...)
 #   link app PACOTE [--minutos N] [--local]    o APK de um app instalado (ex.: org.localsend.localsend_app)
 #   link internet [--minutos N]                internet SEM o filtro da escola para o notebook do seu hotspot (proxy)
@@ -73,7 +75,10 @@ cmd_parar() {
     if p=$(pid_de "$n" "$m"); then kill "$p" 2>/dev/null; fi
     rm -f "$RUN/$n.pid"
   done
-  rm -f "$RUN/publico" "$RUN/local" "$RUN/o-que" "$RUN/arquivos.json"
+  if [ -f "$RUN/preencher-aplicado" ]; then
+    bash "${LINK_CEL:-$(dirname "$SELF")/cel}" sh "wm size reset" >/dev/null 2>&1 </dev/null && echo "Tela do celular de volta ao tamanho normal."
+  fi
+  rm -f "$RUN/publico" "$RUN/local" "$RUN/o-que" "$RUN/arquivos.json" "$RUN/preencher" "$RUN/preencher-aplicado"
   [ -d "$RUN/hls" ] && find "$RUN/hls" -mindepth 1 -delete 2>/dev/null
   echo "Compartilhamento parado: os links deixaram de funcionar."
 }
@@ -106,12 +111,13 @@ mostra() {  # $1 = endereco principal (vai para o QR e para a area de transferen
 }
 
 opcoes() {  # le --minutos N e --local; o resto fica em RESTO
-  MIN=120; LOCAL_SO=0; SOM=0; RESTO=()
+  MIN=120; LOCAL_SO=0; SOM=0; PREENCHER=0; RESTO=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --minutos) MIN=$(num "$2" 120); shift 2 ;;
       --local) LOCAL_SO=1; shift ;;
       --som) SOM=1; shift ;;
+      --preencher) PREENCHER=1; shift ;;
       *) RESTO+=("$1"); shift ;;
     esac
   done
@@ -189,11 +195,77 @@ PY
 # cada pedido da pagina passar por aqui e ser reconhecido.
 proxy_sobe() {  # $1 = host:porta do ScreenStream
   cat > "$RUN/link-proxy.py" <<'PY'
-import asyncio, sys
-alvo, porta = sys.argv[1], int(sys.argv[2])
+import asyncio, ctypes, os, re, socket, subprocess, sys
+alvo, porta, bind, cel, run = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
 AH, AP = alvo.rsplit(":", 1)
 VELHO = b'"ws://" + window.location.host'
 NOVO = b'(location.protocol === "https:" ? "wss://" : "ws://") + window.location.host'
+# fundo preto no lugar do cinza e tela cheia com dois toques/cliques; com --preencher a pagina diz o tamanho da tela de quem assiste
+EXTRA = (b'<style>html,body{background:#000!important}</style><script>(function(){'
+         b'function fs(){var e=document.getElementById("streamDiv")||document.documentElement;'
+         b'if(!document.fullscreenElement&&e.requestFullscreen){e.requestFullscreen();}}'
+         b'document.addEventListener("dblclick",fs);'
+         b'if(PREENCHER){var r=window.devicePixelRatio||1;'
+         b'fetch("/__ajuste?w="+Math.round(screen.width*r)+"&h="+Math.round(screen.height*r)).catch(function(){});}'
+         b'})();</script>')
+FISICO = (720, 1600)
+
+def ips():
+    """enderecos IPv4 atuais do aparelho (o Wi-Fi muda de endereco ao trocar de rede)"""
+    saida = []
+    try:
+        class SA(ctypes.Structure):
+            _fields_ = [("fam", ctypes.c_ushort), ("dados", ctypes.c_ubyte * 14)]
+        class IFA(ctypes.Structure):
+            pass
+        IFA._fields_ = [("prox", ctypes.POINTER(IFA)), ("nome", ctypes.c_char_p), ("flags", ctypes.c_uint), ("end", ctypes.POINTER(SA)),
+                        ("masc", ctypes.c_void_p), ("bc", ctypes.c_void_p), ("extra", ctypes.c_void_p)]
+        libc = ctypes.CDLL(None)
+        q = ctypes.POINTER(IFA)()
+        if libc.getifaddrs(ctypes.byref(q)) == 0:
+            while q:
+                a = q.contents
+                if a.end and a.end.contents.fam == socket.AF_INET and (a.nome or b"") != b"lo":
+                    saida.append(".".join(str(b) for b in bytes(a.end.contents.dados)[2:6]))
+                q = a.prox
+    except Exception:
+        pass
+    return saida
+
+async def abre_alvo():
+    """conecta no ScreenStream; se o endereco antigo sumiu (troca de rede), procura de novo"""
+    global AH
+    for h in [AH] + [x for x in ["127.0.0.1"] + ips() if x != AH]:
+        try:
+            r, w = await asyncio.wait_for(asyncio.open_connection(h, int(AP)), 3)
+            AH = h
+            return r, w
+        except Exception:
+            continue
+    raise OSError("ScreenStream fora do ar")
+
+def forma_para(w, h):
+    """mesma regra do segunda-tela.py: mantem o lado curto (720) e encurta o longo ate a proporcao de quem assiste"""
+    curto, longo = FISICO
+    novo = int(round(curto * max(w, h) / min(w, h) / 2.0)) * 2
+    return None if novo >= longo else (curto, novo)
+
+def ajuste(caminho):
+    if not os.path.exists(os.path.join(run, "preencher")):
+        return
+    m = re.search(rb"[?&]w=(\d{3,4})&h=(\d{3,4})", caminho)
+    if not m:
+        return
+    w, h = int(m.group(1)), int(m.group(2))
+    if not (200 <= w <= 8000 and 200 <= h <= 8000):
+        return
+    f = forma_para(w, h)
+    try:
+        subprocess.run(["bash", cel, "sh", "wm size reset" if f is None else "wm size %dx%d" % f],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        open(os.path.join(run, "preencher-aplicado"), "w").write("%sx%s\n" % (w, h))
+    except Exception:
+        pass
 
 async def pipe(r, w):
     try:
@@ -217,11 +289,22 @@ def sem(linhas, *nomes):
 async def trata(cr, cw):
     try:
         cab = await asyncio.wait_for(cr.readuntil(b"\r\n\r\n"), 30)
-        sr, sw = await asyncio.open_connection(AH, int(AP))
     except Exception:
         cw.close()
         return
     linhas = cab[:-4].split(b"\r\n")
+    if linhas[0].split(b" ")[1:2] and linhas[0].split(b" ")[1].startswith(b"/__ajuste"):
+        await asyncio.get_running_loop().run_in_executor(None, ajuste, linhas[0].split(b" ")[1])
+        cw.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await cw.drain()
+        cw.close()
+        return
+    try:
+        sr, sw = await abre_alvo()
+    except Exception:
+        cw.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        cw.close()
+        return
     if b"upgrade: websocket" in cab.lower():  # WebSocket: passa cru nos dois sentidos
         sw.write(cab)
         await sw.drain()
@@ -239,6 +322,8 @@ async def trata(cr, cw):
     rl = sem(rcab[:-4].split(b"\r\n"), b"connection", b"keep-alive")
     if metodo == b"GET" and caminho.split(b"?")[0] in (b"/", b"/index.html"):
         corpo = (await sr.read()).replace(VELHO, NOVO)
+        extra = EXTRA.replace(b"PREENCHER", b"true" if os.path.exists(os.path.join(run, "preencher")) else b"false")
+        corpo = corpo.replace(b"</body>", extra + b"</body>", 1) if b"</body>" in corpo else corpo + extra
         rl = sem(rl, b"content-length", b"transfer-encoding") + [b"Content-Length: %d" % len(corpo)]
         cw.write(b"\r\n".join(rl + [b"Connection: close", b"", b""]) + corpo)
         await cw.drain()
@@ -250,13 +335,13 @@ async def trata(cr, cw):
     sw.close()
 
 async def main():
-    s = await asyncio.start_server(trata, "127.0.0.1", porta)
+    s = await asyncio.start_server(trata, bind, porta)
     async with s:
         await s.serve_forever()
 
 asyncio.run(main())
 PY
-  nohup python3 "$RUN/link-proxy.py" "$1" "$PORTA" >/dev/null 2>&1 </dev/null &
+  nohup python3 "$RUN/link-proxy.py" "$1" "$PORTA" "${2:-127.0.0.1}" "${LINK_CEL:-$(dirname "$SELF")/cel}" "$RUN" >/dev/null 2>&1 </dev/null &
   echo $! > "$RUN/proxy.pid"
   local i
   for i in $(seq 1 30); do
@@ -348,22 +433,29 @@ cmd_tela() {
   cmd_parar >/dev/null
   echo "tela" > "$RUN/o-que"
   : > "$RUN/local"
+  [ "$PREENCHER" = 1 ] && : > "$RUN/preencher"
+  # o intermediario: fundo preto, tela cheia com dois toques, --preencher e reconexao se o celular trocar de rede
+  local via=1
+  proxy_sobe "$alvo" 0.0.0.0 || { via=0; echo "  (O intermediario nao subiu, porta $PORTA ocupada? Vai direto no ScreenStream, sem tela cheia nem link publico.)"; }
   echo "Tela do celular (ScreenStream). Para quem esta perto:"
   while read -r ifc ip; do
     [ -n "$ip" ] || continue
-    curl -s -o /dev/null -m 2 "http://$ip:$SS_PORTA/" || continue
-    echo "  http://$ip:$SS_PORTA   <- $(rotulo "$ifc")"
-    echo "http://$ip:$SS_PORTA" >> "$RUN/local"
-    case "$ifc" in swlan*|softap*|ap0*) principal=${principal:-http://$ip:$SS_PORTA} ;; esac
+    if [ "$via" = 1 ]; then lan="http://$ip:$PORTA"; else curl -s -o /dev/null -m 2 "http://$ip:$SS_PORTA/" || continue; lan="http://$ip:$SS_PORTA"; fi
+    echo "  $lan   <- $(rotulo "$ifc")"
+    echo "$lan" >> "$RUN/local"
+    case "$ifc" in swlan*|softap*|ap0*) principal=${principal:-$lan} ;; esac
   done < <(enderecos)
+  echo "  Na TV ou no notebook: dois toques (ou dois cliques) na imagem = tela cheia."
+  [ "$PREENCHER" = 1 ] && echo "  --preencher: com o celular DEITADO, a imagem ocupa a tela toda de quem abrir (o celular desenha na proporcao dela; volta no link parar)."
   if [ "$LOCAL_SO" = 0 ]; then
     echo "Criando o link publico (ate 40 s)..."
-    if ! proxy_sobe "$alvo"; then
-      echo "  O intermediario da tela nao subiu (porta $PORTA ocupada?): sem link publico. O local funciona."
+    if [ "$via" = 0 ]; then
+      echo "  Sem o intermediario nao ha link publico. O local funciona."
     elif u=$(tunel "127.0.0.1:$PORTA"); then
       echo "Para qualquer lugar (ate nos dados moveis do aluno):"
       echo "  $u"
       principal=$u
+      echo "  Trocou de rede (Wi-Fi da escola, dados)? ESTE link continua o mesmo; o local muda de endereco."
       echo "  ATENCAO: quem tiver esse link ve a sua tela enquanto ela transmite. Ligue o PIN no ScreenStream"
       echo "  (Configuracoes de seguranca) e diga o PIN so para a turma. Cada aparelho vendo gasta a sua internet."
     else
@@ -692,7 +784,7 @@ cmd_status() {
   if pid_de relogio sleep >/dev/null; then echo "  para sozinho: sim"; fi
 }
 
-uso() { sed -n '2,22p' "$SELF" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,24p' "$SELF" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-}" in
   tela) shift; cmd_tela "$@" ;;

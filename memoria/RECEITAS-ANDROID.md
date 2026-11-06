@@ -18,6 +18,9 @@ Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, 
 | "manda minha tela para a TV/aluno", "compartilha esse arquivo/app" | `link tela` / `link arquivo CAMINHO` / `link app PACOTE`; `link parar` |
 | "tela com som", "o som não sai na TV/notebook" | `link tela --som` (ScreenStream no modo RTSP; receita no `link`) |
 | "internet livre no notebook", "o notebook no hotspot não abre os sites" | `link internet` (proxy; ele configura o proxy no notebook) |
+| "grava a viagem", "câmera do carro", "grava enquanto uso o mapa" | `cel viagem iniciar` · `cel viagem parar` · `cel viagem status` |
+| "faixa preta na câmera do OBS" | `cel obs verificar` |
+| "faixas cinza no navegador", "não fica tela cheia na TV/notebook" | `link tela --preencher` (celular deitado) |
 | "o hotspot tirou a VPN", "pausa a saída com o hotspot" | `saida hotspot status` / `saida hotspot manter` / `saida hotspot pausar` |
 | "manda essa foto/vídeo/arquivo pro PC" | `cel enviar-pc /sdcard/CAMINHO` (chega em Downloads do PC; últimas fotos: `ls -t /sdcard/DCIM/Camera \| head -3`) |
 | "celular como monitor do PC", "segunda tela" | `cel abrir-app com.limelight` e diga: RafaParise > Desktop; para sair de vez: segurar o Desktop > "Sair do Jogo" > SIM |
@@ -29,6 +32,7 @@ Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, 
 | "tela acesa no carregador" | `cel acordado ligar` / `desligar` |
 
 ## Celular no OBS do PC: aula, gravação e live [Provado 05/11 ~22:15, pedido pelo próprio celular]
+- Faixa preta (06/11): ao ligar, o PC mede a tarja na janela do scrcpy (cropdetect), corta, põe a fonte do celular "cobrindo" a tela inteira do OBS e confere a câmera virtual (provado 06/11: "camera virtual SEM faixa"). Avulso: `cel obs verificar` (pelo PC: `webcam-celular.py verificar`). Celular em pé numa tela deitada sempre corta um pouco.
 - O que é: a câmera OU a tela do celular entram no OBS do PC (scrcpy; cabo, Wi-Fi ou dados móveis pela Tailscale), e o OBS
   as entrega como "OBS Virtual Camera" (site da aula, Meet, Teams), grava em `D:\Vídeos\Celular OBS` (MP4) ou faz live.
 - Do celular: `cel obs camera|frontal|tela|gravar|gravar-tela|parar-gravacao|live|parar-live|desligar|status` (vai pela ponte do PC).
@@ -40,6 +44,36 @@ Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, 
 - Nos dados móveis a câmera gasta ~900 MB por hora: avise antes. Modo câmera escurece a tela do celular (a câmera continua).
 - `gravar-tela` leva o som do celular; o microfone do celular fica MUDO sem fone (privacidade, `cel microfone status`).
 - Live: o destino e a chave ficam no OBS do PC (o Rafael configura uma vez); nunca peça nem grave a chave.
+
+## Câmera de viagem: FadCam em segundo plano + Organic Maps na tela [Provado no A12 em 06/11 ~13:00–14:16]
+Por que o FadCam: o Open Camera FECHA a câmera ao sair da tela (código atual dele, `Preview.onPause` -> `closeCamera`); só grava em tela dividida.
+O FadCam (F-Droid, GPL-3.0, 3.0.1, hash conferido com o índice assinado) grava como serviço, com o aviso na barra.
+- Ativar: `cel viagem iniciar` (abre o FadCam, espera 7 s porque frio ele TRAVA se mandar gravar na hora, grava, abre o Organic Maps).
+  Parar: `cel viagem parar` ou "Stop" no aviso do FadCam (barra de cima > aviso FadCam > Stop). Estado: `cel viagem status`.
+- Onde ficam: cartão SD, pasta `Viagens` (`/storage/1A2B-3C4D/Viagens`), partes de 500 MB (~4 min a 16 Mbps): um travamento perde no máximo uma parte.
+- Ajustes feitos (06/11): traseira (a única lente que o Android entrega a apps), 1080p, 30 qps (máximo real do A12: `aeAvailableTargetFpsRanges` até 30),
+  H.264 a 16 Mbps (o A12 não grava HEVC; 16 é a dica do próprio app para 1080p), deitado, data e hora no vídeo, local (GPS) no arquivo,
+  foco contínuo (não há foco fixo no infinito), sem redução de ruído (experimental), sem busca de atualização. App em inglês (não tem português).
+- Medido: 3 min 9 s, 1920x1080, 15,9 Mbps, 0 erro ao decodificar; gravação seguiu com o Organic Maps em tela cheia, girando a tela e abrindo a barra de avisos.
+- Calor: o `cel viagem` vigia a bateria a cada minuto e só AVISA (42 °C: aviso; 45 °C: aviso com vibração). Nada é fechado por ele.
+- Limites [Certo: registro de falhas do Android, 06/11]: (1) reabrir o FadCam durante a gravação PODE travá-lo (1 em 5 vezes) e a gravação para:
+  não reabra; o `cel viagem` avisa "a gravação PAROU" se isso acontecer. (2) Lanterna durante a gravação: o FadCam acende, mas ao apagar TRAVA:
+  `cel viagem lanterna` só explica. (3) O FadCam cria um arquivo vazio de ~1 KB ao começar pelo comando; o `cel viagem parar` apaga só esses.
+- Precisa: `termux-am` (pkg) e o Termux com "Sobrepor a outros apps" (appops SYSTEM_ALERT_WINDOW allow, dado em 06/11; desfaz: `appops set com.termux SYSTEM_ALERT_WINDOW default`).
+
+## Calor: por que a câmera fechava e o mapa ficava [Certo: código do SDHMS do próprio aparelho, decompilado em 06/11]
+- O serviço térmico da Samsung (`com.sec.android.sdhms`, desativado desde 30/10 mas o Android o mantém rodando por ser persistente) tem o
+  "Overheat App Kill": fecha à força (`forceStopPackageAsUser`) o app VISÍVEL na tela e apaga a tela. Poupa: tela inicial, apps de
+  navegação (lista "Navigation", por isso o Organic Maps fica), a lista "except_ovt" e pacotes protegidos. Também tem `flash_led_disable`
+  (o flash pisca/apaga no calor) e `camera_recording_disable`. Remover ou desligar exige root (decidido não fazer).
+- Saída: gravar com o FadCam em segundo plano (`cel viagem`), que não é "visível" e por isso não entra na regra; o aviso de calor fica com o `cel viagem`.
+
+## O celular reiniciou sozinho [06/11 08:05]
+- Ver o motivo: `cel sh "getprop sys.boot.reason"`. `kernel_panic,...watchdog_timer...100s` = o sistema ficou 100 s sem responder.
+- 06/11 (teste de estresse do Rafael: ScreenStream transmitindo, hotspot ligado e troca para o Wi-Fi da SEDUC): uns 100 s antes, netd, o
+  serviço de ancoragem e outros tinham acabado de reiniciar (o Android caiu e recomeçou); depois ficaram parados esperando memória/disco e o
+  driver de tela preso numa trava [Provável: registro do kernel]. Sem root não há conserto; diminui o risco: memória folgada antes de estressar
+  (fechar o Organic Maps, 572 MB, e o Matrix), não trocar de Wi-Fi com hotspot + ScreenStream ligados.
 
 ## Regra de ouro para operar qualquer app (o "olho e dedo")
 1. `cel abrir-app PACOTE` (ache o pacote: `cel apps texto`), ou `cel abrir TELA` para Configurações.
@@ -110,6 +144,7 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
 - No fim, lembre o Rafael de tocar em "Parar" no ScreenStream (a transmissão segue até ele parar).
 - Falhou "o túnel não saiu": a internet do celular caiu ou a Cloudflare recusou; o link local (`--local`) continua valendo.
 - **Tela COM SOM (06/11): `link tela --som`.** O modo de sempre (Local, MJPEG) NÃO tem som [Certo: README do ScreenStream]. Com som: no ScreenStream, Modo = RTSP (Servidor; padrão porta 8554, caminho `screen` [Certo: `RtspSettings.kt`]), em Áudio ligar "Áudio do dispositivo" (vem desligado), Vídeo = H.264, Iniciar; depois `link tela --som`. O ffmpeg do Termux (`pkg install ffmpeg`, uma vez) copia o vídeo sem recodificar e passa o som para AAC, em HLS; a página toca em qualquer navegador (hls.js 1.5.20, Apache-2.0, baixado uma vez e conferido por SHA-256; sem ele só Safari e algumas TVs). Quem abre toca em "Toque para ouvir o som" (o navegador não toca som sozinho). Atraso: alguns segundos. O comando avisa se veio H.265 ou sem som. O RTSP do ScreenStream não tem senha no modo servidor: quem está na mesma rede consegue abrir `rtsp://IP:8554/screen`. Feito sem o celular (06/11): falta provar no aparelho.
+- **Tela cheia no navegador (06/11):** todo `link tela` passa pelo intermediário: fundo PRETO (era cinza, cor do ScreenStream) e dois toques/cliques = tela cheia. `link tela --preencher`: a página diz ao celular o tamanho da tela de quem assiste e o celular desenha nessa proporção (mesma regra do `segunda-tela.py`: 16:9 -> `wm size 720x1280`); precisa do celular DEITADO e da depuração sem fio do `cel`; `link parar` devolve o tamanho normal. Trocou de rede? O link público (https) segue o mesmo e o intermediário acha o ScreenStream no endereço novo; o local muda.
 - **Internet para o notebook do hotspot (06/11): `link internet`** — receita em `VPN-SEMPRE-ATIVA.md` (proxy na porta 3128; ele configura o proxy no Windows e DESATIVA ao terminar).
 
 ## Dados móveis, hotspot e o PC de longe [Provado 05/11]

@@ -447,6 +447,43 @@ def resume_medida(texto):
     return {"quadros": len(vals), "brilho": round(sum(vals) / len(vals)) if vals else 0, "tamanho": f"{m.group(1)}x{m.group(2)}" if m else "?"}
 
 
+def faixas(texto, tolerancia=0.02):
+    """Le a saida do cropdetect do ffmpeg: (esq, cima, dir, baixo) da tarja preta em pixels, ou None (sem tarja ou medida
+    inconclusiva: imagem quase toda escura, como a camera de noite, nao e tarja)."""
+    tam = re.search(r"Video: .*?(\d{3,4})x(\d{3,4})", texto)
+    cortes = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", texto)
+    if not tam or not cortes:
+        return None
+    W, H = int(tam.group(1)), int(tam.group(2))
+    cw, ch, x, y = (int(v) for v in cortes[-1])
+    if cw * ch < 0.5 * W * H:  # sobrou menos da metade: e escuridao, nao faixa
+        return None
+    m = (x, y, max(0, W - x - cw), max(0, H - y - ch))
+    return m if (m[0] + m[2]) > tolerancia * W or (m[1] + m[3]) > tolerancia * H else None
+
+
+def mede_faixas(entrada, segundos=3):
+    """cropdetect em ~3 s da janela do scrcpy (gdigrab) ou da camera virtual (dshow); so mede, nada e gravado nem visto."""
+    fonte = ["-f", "gdigrab", "-i", f"title={TITULO}"] if entrada == "janela" else ["-f", "dshow", "-i", "video=OBS Virtual Camera"]
+    r = roda(["ffmpeg", "-hide_banner", *fonte, "-t", str(segundos), "-vf", "cropdetect=limit=24:round=2:reset=0", "-f", "null", "-"], 60)
+    return faixas(r.stdout + r.stderr)
+
+
+def corrige_faixas():
+    """Verificacao pedida pelo Rafael (06/11: faixa preta com o celular de camera pelos dados): mede a tarja na janela do
+    scrcpy, encaixa a fonte do celular na tela inteira do OBS cortando a tarja e confere a camera virtual depois."""
+    m = mede_faixas("janela")
+    r = no_obs(lambda mod, o: mod.encaixa(o, m), 2)
+    if r is None:
+        return None
+    cena, tam, feitos = r
+    print(f"OBS: {', '.join(feitos) or 'nenhuma fonte do celular'} na cena {cena} ocupando {tam[0]}x{tam[1]}"
+          + (f"; tarja cortada {m}" if m else ""))
+    depois = mede_faixas("camera")
+    print("verificacao: camera virtual SEM faixa" if depois is None else f"ATENCAO: ainda ha faixa na camera virtual {depois} (celular em pe? deite-o)")
+    return depois is None
+
+
 def imagem_real(medida):
     return medida["quadros"] >= 5 and medida["brilho"] >= BRILHO_MINIMO_LANTERNA
 
@@ -501,6 +538,8 @@ def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False,
             time.sleep(8)
         if not provar:
             prepara_camera_virtual(tentativas=4)
+            time.sleep(2)  # a janela do scrcpy ja mostrando imagem
+            corrige_faixas()  # 06/11: faixa preta pelos dados moveis; mede, corta a tarja, encaixa e confere
         if gravar:
             gravando = bool(grava_no_obs("iniciar"))
         if not provar:  # icone fixo na barra do celular enquanto estiver no OBS (some ao desligar)
@@ -642,7 +681,7 @@ def status():
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Celular (camera ou tela) no OBS do PC: webcam, gravacao e live, perto ou longe")
     ap.add_argument("modo", nargs="?", default="ligar",
-                    choices=["ligar", "provar", "fechar-sem-fio", "iniciar", "parar", "status", "gravar", "parar-gravacao", "live", "parar-live"])
+                    choices=["ligar", "provar", "fechar-sem-fio", "iniciar", "parar", "status", "gravar", "parar-gravacao", "live", "parar-live", "verificar"])
     ap.add_argument("--frontal", action="store_true")
     ap.add_argument("--sem-fio", action="store_true", help="usa a rede mesmo com o cabo ligado")
     ap.add_argument("--tamanho", default="1280x720")
@@ -661,6 +700,9 @@ def main(argv=None):
             return parar()
         if a.modo == "status":
             return status()
+        if a.modo == "verificar":  # faixa preta na imagem: mede, corrige e confere (o celular ja no OBS)
+            ok = corrige_faixas()
+            return 0 if ok else (2 if ok is None else 1)
         if a.modo == "gravar":
             if em_fundo() or obs_aberto():
                 if not em_fundo():

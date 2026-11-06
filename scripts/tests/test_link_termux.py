@@ -85,7 +85,7 @@ def pega(url):
     assert u.hostname == "127.0.0.1"
     c = http.client.HTTPConnection("127.0.0.1", u.port, timeout=5)
     try:
-        c.request("GET", u.path or "/")
+        c.request("GET", (u.path or "/") + ("?" + u.query if u.query else ""))
         r = c.getresponse()
         return r.status, r.read(), r.headers
     finally:
@@ -209,7 +209,7 @@ def test_tela_com_screenstream_abre_o_tunel_pelo_intermediario(amb):
         assert rc == 0, out
         assert "https://teste-abc-def.trycloudflare.com" in out and "PIN" in out
         assert f"--url http://127.0.0.1:{amb.porta}" in amb.log.read_text()  # o tunel vai ao intermediario
-        assert f"http://127.0.0.1:{amb.ss_porta}" in out  # o local segue direto no ScreenStream
+        assert f"http://127.0.0.1:{amb.porta}" in out  # o local tambem passa pelo intermediario (tela cheia, fundo preto)
         # o intermediario troca o ws:// fixo (bloqueado em pagina https) e deixa o resto igual
         st, corpo, _ = pega(f"http://127.0.0.1:{amb.porta}/")
         assert st == 200 and b'"wss://"' in corpo and b'"ws://" + window' not in corpo
@@ -225,7 +225,7 @@ def test_tela_local_nao_sobe_intermediario_nem_tunel(amb):
         rc, out = amb.roda("tela", "--local")
     finally:
         srv.shutdown()
-    assert rc == 0 and "cloudflared" not in amb.log.read_text() and not (amb.run / "proxy.pid").exists()
+    assert rc == 0 and "cloudflared" not in amb.log.read_text() and (amb.run / "proxy.pid").exists()  # sem tunel; com intermediario
 
 
 def test_parar_sem_nada_e_status_vazio(amb):
@@ -503,3 +503,52 @@ def test_internet_so_atende_quem_esta_no_hotspot(amb):
     except ConnectionResetError:
         r = b""
     assert r == b""  # fecha sem responder
+
+
+# ---- tela cheia, fundo preto e --preencher (06/11: faixas cinza no notebook da escola)
+FALSO_CEL = '#!/bin/bash\necho "cel $*" >> "$FAKE_LOG"\n'
+
+
+def cel_falso(amb):
+    (amb.bin / "cel").write_text(FALSO_CEL)
+    (amb.bin / "cel").chmod(0o755)
+    velho = amb.env
+
+    def env():
+        e = velho()
+        e["LINK_CEL"] = str(amb.bin / "cel")
+        return e
+    amb.env = env
+
+
+def test_tela_injeta_fundo_preto_e_tela_cheia_sem_preencher(amb):
+    cel_falso(amb)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", amb.ss_porta), FalsoSS)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        rc, out = amb.roda("tela", "--local")
+        assert rc == 0 and "dois toques" in out
+        st, corpo, _ = pega(f"http://127.0.0.1:{amb.porta}/")
+        assert b"background:#000" in corpo and b"dblclick" in corpo and b"if(false)" in corpo
+        assert pega(f"http://127.0.0.1:{amb.porta}/__ajuste?w=1920&h=1080")[0] == 204
+        assert "wm size" not in amb.log.read_text()  # sem --preencher, a pagina nao muda o celular
+    finally:
+        srv.shutdown()
+
+
+def test_tela_preencher_ajusta_a_proporcao_e_parar_desfaz(amb):
+    cel_falso(amb)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", amb.ss_porta), FalsoSS)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        rc, out = amb.roda("tela", "--local", "--preencher")
+        assert rc == 0 and "DEITADO" in out
+        assert b"if(true)" in pega(f"http://127.0.0.1:{amb.porta}/")[1]
+        assert pega(f"http://127.0.0.1:{amb.porta}/__ajuste?w=1920&h=1080")[0] == 204
+        assert "cel sh wm size 720x1280" in amb.log.read_text()  # mesma regra do segunda-tela: 16:9 -> 720x1280
+        assert pega(f"http://127.0.0.1:{amb.porta}/__ajuste?w=99999&h=1")[0] == 204  # fora da faixa: ignorado
+        assert amb.log.read_text().count("wm size") == 1
+    finally:
+        srv.shutdown()
+    rc, out = amb.roda("parar")
+    assert "cel sh wm size reset" in amb.log.read_text() and "tamanho normal" in out

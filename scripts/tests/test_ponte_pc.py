@@ -675,7 +675,7 @@ def test_acoes_do_obs_nao_mexem_no_adb_e_chamam_o_script_da_webcam(mundo):
 
 def test_acoes_do_obs_tem_lista_fechada_sem_argumento_livre(mundo):
     obs = {k: v for k, v in mundo.m.ACOES_PC.items() if k.startswith("obs-")}
-    assert len(obs) == 10
+    assert len(obs) == 11  # 06/11: obs-verificar (faixa preta)
     for k, (desc, script, *args) in obs.items():
         assert script == "webcam-celular.py" and desc
-        assert all(a.startswith("--") or a in ("iniciar", "gravar", "parar", "parar-gravacao", "status", "live", "parar-live") for a in args), k
+        assert all(a.startswith("--") or a in ("iniciar", "gravar", "parar", "parar-gravacao", "status", "live", "parar-live", "verificar") for a in args), k

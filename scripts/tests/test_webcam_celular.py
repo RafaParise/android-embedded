@@ -317,3 +317,30 @@ def test_comandos_novos_sem_fundo_ligado(wc, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="List of devices attached\n", stderr=""))
     assert wc.main(["parar"]) == 0
     assert "Nada ligado" in capsys.readouterr().out
+
+
+# ---- faixa preta (06/11): cropdetect diz onde esta a tarja; escuridao da camera NAO e tarja
+def test_faixas_le_a_tarja_do_cropdetect(wc):
+    texto = "Stream #0:0: Video: bmp, bgra, 1280x720\n[Parsed_cropdetect_0] x1:0 crop=1280:540:0:90\n... crop=1280:540:0:90"
+    assert wc.faixas(texto) == (0, 90, 0, 90)
+
+
+def test_faixas_sem_tarja_e_escuridao_dao_none(wc):
+    assert wc.faixas("Video: bmp, 1280x720\n crop=1280:720:0:0") is None
+    assert wc.faixas("Video: bmp, 1280x720\n crop=1276:718:2:0") is None  # menos de 2%: nao e faixa
+    assert wc.faixas("Video: bmp, 1280x720\n crop=320:200:480:260") is None  # quase tudo escuro (noite): inconclusivo
+    assert wc.faixas("nada") is None
+
+
+def test_corrige_faixas_mede_encaixa_e_confere(wc, monkeypatch):
+    medidas = iter([(0, 90, 0, 90), None])
+    monkeypatch.setattr(wc, "mede_faixas", lambda entrada, segundos=3: next(medidas))
+    pedidos = []
+    monkeypatch.setattr(wc, "no_obs", lambda acao, tentativas=1: pedidos.append(tentativas) or ("Cena", (1280, 720), ["Janela scrcpy"]))
+    assert wc.corrige_faixas() is True and pedidos
+
+
+def test_corrige_faixas_com_obs_fechado(wc, monkeypatch):
+    monkeypatch.setattr(wc, "mede_faixas", lambda entrada, segundos=3: None)
+    monkeypatch.setattr(wc, "no_obs", lambda acao, tentativas=1: None)
+    assert wc.corrige_faixas() is None

@@ -107,6 +107,7 @@ ACOES_PC = {
     "obs-parar-gravacao": ("para a gravacao e salva o arquivo (camera ou tela continuam ligadas)", "webcam-celular.py", "parar-gravacao"),
     "obs-desligar": ("desliga camera ou tela do celular no PC (salva a gravacao, devolve o OBS, acende a tela)", "webcam-celular.py", "parar"),
     "obs-status": ("o que esta ligado: celular no OBS, camera virtual, gravacao, live e permissoes do Windows", "webcam-celular.py", "status"),
+    "obs-verificar": ("faixa preta na imagem do celular no OBS: mede, corta a tarja, encaixa na tela inteira e confere", "webcam-celular.py", "verificar"),
     "obs-live-iniciar": ("comeca a LIVE no OBS do PC (destino e chave que o Rafael configurou no OBS)", "webcam-celular.py", "live"),
     "obs-live-parar": ("encerra a live", "webcam-celular.py", "parar-live"),
 }

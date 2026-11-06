@@ -192,6 +192,31 @@ def cena_com_webcam(obs):
     return atual, False
 
 
+def eh_video_do_celular(nome):
+    n = nome.lower()
+    return ("scrcpy" in n or "webcam" in n or "celular" in n) and "som" not in n and "audio" not in n and "microfone" not in n
+
+
+def encaixa(obs, recorte=None):
+    """Sem faixa preta (06/11): a fonte do celular na cena NO AR ocupa a tela INTEIRA do OBS ("cobrir", OBS_BOUNDS_SCALE_OUTER:
+    se a proporcao nao bate, sobra um pouco para fora, nunca faixa) e, com `recorte` = (esq, cima, dir, baixo) em pixels da
+    fonte, corta a tarja que o proprio scrcpy desenhou. Com caixa de limite, o OBS reajusta sozinho se a resolucao mudar."""
+    v = obs.pede("GetVideoSettings")
+    w, h = int(v.get("baseWidth") or 1280), int(v.get("baseHeight") or 720)
+    cena = obs.pede("GetCurrentProgramScene").get("currentProgramSceneName", "")
+    l, cima, r, baixo = recorte or (0, 0, 0, 0)
+    feitos = []
+    for i in obs.pede("GetSceneItemList", {"sceneName": cena}).get("sceneItems", []):
+        if not eh_video_do_celular(i.get("sourceName", "")) or "sceneItemId" not in i:
+            continue
+        obs.pede("SetSceneItemTransform", {"sceneName": cena, "sceneItemId": i["sceneItemId"], "sceneItemTransform": {
+            "boundsType": "OBS_BOUNDS_SCALE_OUTER", "boundsWidth": float(w), "boundsHeight": float(h), "boundsAlignment": 0,
+            "positionX": 0.0, "positionY": 0.0, "alignment": 5, "rotation": 0.0,
+            "cropLeft": int(l), "cropTop": int(cima), "cropRight": int(r), "cropBottom": int(baixo)}})
+        feitos.append(i["sourceName"])
+    return cena, (w, h), feitos
+
+
 def gravar(obs, acao):
     st = obs.pede("GetRecordStatus")
     if acao == "iniciar":
@@ -241,7 +266,7 @@ def main(argv=None):
         print(USO)
         return 2
     cmd, resto = a[0], a[1:]
-    validos = {"status": [], "cenas": [], "camera-virtual": ["ligar", "desligar"], "gravar": ["iniciar", "parar", "status"],
+    validos = {"status": [], "cenas": [], "encaixar": [], "camera-virtual": ["ligar", "desligar"], "gravar": ["iniciar", "parar", "status"],
                "transmitir": ["iniciar", "parar", "status"], "cena": None}
     if cmd not in validos or (validos[cmd] and (len(resto) != 1 or resto[0] not in validos[cmd])) or (cmd == "cena" and len(resto) != 1):
         print(USO)
@@ -252,6 +277,9 @@ def main(argv=None):
                 print(status(obs))
             elif cmd == "cenas":
                 print("\n".join(c["sceneName"] for c in reversed(obs.pede("GetSceneList").get("scenes", []))))
+            elif cmd == "encaixar":
+                cena, tam, feitos = encaixa(obs)
+                print(f"cena {cena}: {', '.join(feitos) or 'nenhuma fonte do celular'} ocupando {tam[0]}x{tam[1]} (sem faixa)")
             elif cmd == "camera-virtual":
                 print("camera virtual:", camera_virtual(obs, resto[0] == "ligar"))
             elif cmd == "gravar":
