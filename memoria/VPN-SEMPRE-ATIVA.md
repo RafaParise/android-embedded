@@ -49,3 +49,8 @@ Pedido do Rafael: "deixar sempre a VPN ligada ... em qualquer rede Wi-Fi que eu 
 - Desligar o adaptador Wi-Fi do PC da economia de energia ("Permitir que o computador desligue este dispositivo": está ligado); o PC nunca suspende na tomada (suspensão e hibernação em CA = nunca), então o risco é pequeno; o `Set-NetAdapterPowerManagement` deste Windows não tem esse parâmetro (só pelo Gerenciador de Dispositivos).
 
 Fontes: tailscale.com/kb/1103/exit-nodes · tailscale.com/pricing · developer.android.com/topic/performance/appstandby e /power/power-details · github.com/tailscale/tailscale/issues/8143 e tailscale-android commit 864cc35 · mullvad.net/blog/android-leaks-connectivity-check-traffic · forum.tailscale.com (Android + AlwaysOn).
+
+## Hotspot do celular com a saída pelo PC (05/11)
+- O Tailscale só deixa fora do túnel a rede do Wi-Fi em uso; a rede do hotspot cai no túnel. Conexão que chega do hotspot volta certo; conexão que um app do celular inicia para um aparelho do hotspot se perde.
+- Por isso o guarda `saida` PAUSA a saída enquanto o hotspot está ligado (`saida status` mostra "PAUSADA: hotspot ligado") e religa sozinho quando ele desliga (conferindo o PC e a internet, como na volta do PC).
+- ScreenStream: Filtro de interface com VPN e Filtro de endereço com Público = abre também em `http://100.64.0.2:8080` (Tailscale, de qualquer lugar). KDE Connect: o celular tem o PC por IP (`100.64.0.1`).

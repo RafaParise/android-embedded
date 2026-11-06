@@ -23,6 +23,8 @@ Tudo pelo `cel` (porta 5555 do adb: qualquer rede). Marcas: [Conferido 05/11] = 
 - Não Perturbe: `cel sh "cmd notification set_dnd priority"` (só prioridade), `alarms` (só alarmes), `on` (silêncio total), `off` [Conferido 05/11].
 - Volume da mídia: `cel sh "cmd media_session volume --stream 3 --set 8"` (0 a 15; `--get` lê) [Conferido 05/11: o comando existe].
 - Brilho: `cel sh "settings put system screen_brightness_mode 0; settings put system screen_brightness 120"` (0 a 255; modo 1 = automático). Estava em 66 em 05/11.
+- Brilho automático (adaptável): JÁ ESTÁ DESLIGADO (`screen_brightness_mode` = 0, conferido em 05/11 21:05). "Onde configuro?": `cel abrir tela` (Configurações > Visor) e diga a ele "Brilho adaptável" lá dentro; não precisa buscar mais nada.
+- Lanterna: `cel lanterna ligar` / `cel lanterna desligar` (Termux:API; funciona sem a depuração sem fio). Não procure outra receita.
 - Rotação: `cel sh "settings put system accelerometer_rotation 1"` (1 = automática; o Rafael usa automática).
 - Escurecer sem bloquear: `cel tela apagar` / `cel tela acender`. NUNCA `keyevent 26`/`223` nem `SurfaceControl` (regras do projeto).
 - Foto da tela: `cel sh "screencap -p /sdcard/Pictures/Screenshots/matrix-$(date +%H%M%S).png"`.
@@ -58,7 +60,25 @@ Tudo pelo `cel` (porta 5555 do adb: qualquer rede). Marcas: [Conferido 05/11] = 
 - Procurar arquivo: `cel procurar TEXTO`; nos projetos do cartão: `memoria buscar TEXTO` (o índice tem o texto de todos os arquivos).
 - Cartão SD: `/storage/1A2B-3C4D` (exFAT, 477 GB); a memória do Matrix fica em `Android/data/com.termux/files/matrix-memoria`.
 
+## Compartilhar com qualquer pessoa, de qualquer celular ou PC: `link` [Provado 05/11 ~21:55]
+Para quê: mandar a TELA, um ARQUIVO ou um APP para quem não tem nenhum app (celular de aluno nos dados móveis, smart TV,
+notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quick Share da Samsung NÃO volta (pedido dele).
+- Tela: o Rafael abre o ScreenStream e toca "Iniciar transmissão" (o Android pede confirmação, é a mão dele); depois `link tela`.
+  Mostra o link https (Cloudflare, grátis, sem conta), o QR no Termux e copia o link. `--minutos N` (padrão 120, máx. 720);
+  `--local` = só os endereços da mesma rede ou do hotspot, sem internet. Sem PIN no ScreenStream, quem tiver o link vê a tela:
+  avise; com PIN, um aluno que errar o PIN bloqueia o link para todos (todos chegam pelo mesmo intermediário).
+- Arquivo: `link arquivo CAMINHO [CAMINHO...]` (foto, vídeo, PDF); quem abre o link baixa. Recusa senha, chave, `.env`, `.ssh`, MAPAO.
+- App: `link app PACOTE` (ache com `cel apps texto`); vira `pacote-versão.apk`. App dividido (split) é recusado: aí use o LocalSend.
+- `link status` mostra o que está no ar; `link parar` derruba tudo (o link morre na hora). Ele também para sozinho no fim do tempo.
+- No fim, lembre o Rafael de tocar em "Parar" no ScreenStream (a transmissão segue até ele parar).
+- Falhou "o túnel não saiu": a internet do celular caiu ou a Cloudflare recusou; o link local (`--local`) continua valendo.
+
+## Dados móveis, hotspot e o PC de longe [Provado 05/11]
+- Pelos dados, o PC responde pela Tailscale (100.64.0.1): RDP 3389 (aFreeRDP), ponte 20130, OmniRoute 20128.
+- Hotspot ligado: o `saida` PAUSA sozinho a saída de internet pelo PC (para o hotspot funcionar) e religa ao desligar.
+- ScreenStream pela Tailscale: `http://100.64.0.2:8080` (filtros VPN e Público ligados no app). KDE Connect acha o PC pelo IP da Tailscale.
+
 ## Interface do Rafael (05/11)
-- Tela inicial da Samsung em "Apenas a Tela inicial" (sem gaveta), 4 páginas; papel rolante com acessibilidade própria (não desligue).
+- Tela inicial da Samsung em "Apenas a Tela inicial" (sem gaveta), 5 páginas (a 5ª vazia, para o papel rolante mostrar a imagem inteira); papel rolante com acessibilidade própria (não desligue). Nunca mude a ordem dos ícones.
 - Telefone da Samsung removido; o padrão é o Fossify Telefone (a emergência continua no app da Samsung).
 - Segunda tela: no PC, atalho "Segunda tela"; aqui, o Moonlight.

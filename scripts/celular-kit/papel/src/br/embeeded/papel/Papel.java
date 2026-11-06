@@ -65,11 +65,11 @@ public class Papel extends WallpaperService {
         super.onDestroy();
     }
 
-    /** Posicao exata da tela inicial (0 = primeira pagina, 1 = ultima), vinda da Sincronia. */
-    static void pagina(float p) {
+    /** Posicao exata da tela inicial (0 = primeira pagina, 1 = ultima) e quantas paginas ela tem, vindas da Sincronia. */
+    static void pagina(float p, int paginasReais) {
         Papel s = viva;
         if (s == null) return;
-        for (Motor m : new java.util.ArrayList<>(s.motores)) m.fila.post(() -> m.vaiPara(p));
+        for (Motor m : new java.util.ArrayList<>(s.motores)) m.fila.post(() -> m.real(p, paginasReais));
     }
 
     @Override
@@ -105,6 +105,11 @@ public class Papel extends WallpaperService {
         private boolean animando;
         private float animDe, animAlvo;
         private long animIni;
+        private int animMs = 240;
+        private int paginasReais, paginasGravadas;
+        private float ultimoReal;
+        private boolean temReal;
+        private long ultimoRealHora, soltouHora;
 
         @Override
         public void onCreate(SurfaceHolder holder) {
@@ -123,14 +128,73 @@ public class Papel extends WallpaperService {
                 Log.w(TAG, "sem setFixedSizeAllowed: " + t);
             }
             carrega();
+            lePosicao();
             ajustaTamanho();
             motores.add(this);
         }
 
+        /**
+         * Posicao REAL da tela inicial (Sincronia). Os avisos chegam a cada ~100 ms (limite do Android para avisos de
+         * rolagem), entao o papel PERSEGUE o alvo: passo curto = 110 ms quase linear (segue o dedo sem degrau); salto
+         * (a pagina encaixou de uma vez, com as animacoes do sistema em 0) = 220 ms suave. Medido em 05/11 21:25: com o
+         * palpite do toque o papel andava quando a tela inicial nao mudava de pagina e saltava quando ela encaixava.
+         */
+        /** Aviso da Sincronia: guarda a posicao e as paginas reais; fora de um arrasto, vai ate ela. */
+        void real(float p, int n) {
+            if (n >= 2) paginasReais = n;
+            boolean mudou = !temReal || Math.abs(p - ultimoReal) > 0.01f || n != paginasGravadas;
+            ultimoReal = p;
+            temReal = true;
+            ultimoRealHora = SystemClock.uptimeMillis();
+            if (mudou) gravaPosicao(p, n);
+            if (!arrastando) vaiPara(p);
+        }
+
+        /** posicao.txt: "posicao paginas" da tela inicial, para comecar certo depois de reiniciar ou atualizar o app. */
+        private void gravaPosicao(float p, int n) {
+            File f = arquivo("posicao.txt");
+            if (f == null) return;
+            try (java.io.FileWriter w = new java.io.FileWriter(f)) {
+                w.write(String.format(java.util.Locale.ROOT, "%.4f %d%n", p, n));
+                paginasGravadas = n;
+            } catch (Exception e) {
+                Log.w(TAG, "posicao.txt: " + e);
+            }
+        }
+
+        private void lePosicao() {
+            File f = arquivo("posicao.txt");
+            if (f == null || !f.isFile()) return;
+            try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+                String[] c = r.readLine().trim().split(" +");
+                float p = Float.parseFloat(c[0]);
+                int n = Integer.parseInt(c[1]);
+                if (p >= 0f && p <= 1f && n >= 2 && n <= 12) {
+                    pos = ultimoReal = p;
+                    paginasReais = paginasGravadas = n;
+                    temReal = true;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "posicao.txt: " + e);
+            }
+        }
+
+        /** Quantas paginas valem agora: as reais (Sincronia) ou, sem ela, as do paginas.txt. */
+        private int nPaginas() {
+            return paginasReais >= 2 ? paginasReais : paginas;
+        }
+
+        /** 700 ms depois de soltar: se a tela inicial nao avisou nada, ela nao mudou de pagina; volta para a real. */
+        private final Runnable confere = () -> {
+            if (temReal && !arrastando && ultimoRealHora < soltouHora) vaiPara(ultimoReal);
+        };
+
         void vaiPara(float p) {
-            if (arrastando || lancadorRola) return;
-            if (Math.abs(p - (animando ? animAlvo : pos)) < 0.002f) return;
-            anima(p);
+            if (lancadorRola) return;
+            float alvoAtual = animando ? animAlvo : pos;
+            if (Math.abs(p - alvoAtual) < 0.002f) return;
+            float passoPagina = 1f / Math.max(1, nPaginas() - 1);
+            anima(p, Math.abs(p - pos) <= passoPagina * 0.6f ? 110 : 220);
         }
 
         void reajusta() {
@@ -350,11 +414,15 @@ public class Papel extends WallpaperService {
 
         @Override
         public void onTouchEvent(MotionEvent e) {
+            // O dedo move o papel na hora (o aviso da tela inicial so chega ~0,5 s depois de a pagina encaixar); a
+            // posicao real acerta o fim (real/confere). As paginas do caminho sao as REAIS quando a Sincronia esta ligada.
             if (lancadorRola || img == null || tela.x > tela.y) return;
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     x0 = e.getX();
                     y0 = e.getY();
+                    fila.removeCallbacks(confere);
+                    if (temReal && !animando) pos = ultimoReal;  // comeca do lugar certo
                     pos0 = pos;
                     decidido = false;
                     arrastando = false;
@@ -372,7 +440,7 @@ public class Papel extends WallpaperService {
                         arrastando = Math.abs(dx) > Math.abs(dy) * 1.2f;
                     }
                     if (arrastando) {
-                        pos = limita(pos0 - dx / (tela.x * (float) (paginas - 1)));
+                        pos = limita(pos0 - dx / (tela.x * (float) (nPaginas() - 1)));
                         desenha();
                     }
                     break;
@@ -380,7 +448,7 @@ public class Papel extends WallpaperService {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL: {
                     if (arrastando) {
-                        float passo = 1f / (paginas - 1);
+                        float passo = 1f / (nPaginas() - 1);
                         int pag = Math.round(pos / passo);
                         if (vel != null && e.getActionMasked() == MotionEvent.ACTION_UP) {
                             vel.addMovement(e);
@@ -391,7 +459,10 @@ public class Papel extends WallpaperService {
                                 pag = v < 0 ? base + 1 : base - 1;
                             }
                         }
-                        anima(limita(pag * passo));
+                        anima(limita(pag * passo), 240);
+                        soltouHora = SystemClock.uptimeMillis();
+                        fila.removeCallbacks(confere);
+                        if (temReal) fila.postDelayed(confere, 700);
                     }
                     if (vel != null) {
                         vel.recycle();
@@ -405,9 +476,10 @@ public class Papel extends WallpaperService {
             }
         }
 
-        private void anima(float alvo) {
+        private void anima(float alvo, int ms) {
             animDe = pos;
             animAlvo = alvo;
+            animMs = ms;
             animIni = SystemClock.uptimeMillis();
             animando = true;
             fila.removeCallbacks(this);
@@ -417,8 +489,9 @@ public class Papel extends WallpaperService {
         @Override
         public void run() {
             if (!animando) return;
-            float t = Math.min(1f, (SystemClock.uptimeMillis() - animIni) / 240f);
-            float k = 1f - (1f - t) * (1f - t) * (1f - t);
+            float t = Math.min(1f, (SystemClock.uptimeMillis() - animIni) / (float) animMs);
+            // perseguicao curta: quase linear (sem freada a cada aviso); salto: desacelera no fim
+            float k = animMs <= 120 ? 1f - (1f - t) * (1f - t) * 0.35f - (1f - t) * 0.65f : 1f - (1f - t) * (1f - t) * (1f - t);
             pos = animDe + (animAlvo - animDe) * k;
             desenha();
             if (t < 1f) fila.postDelayed(this, 16);

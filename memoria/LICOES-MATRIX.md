@@ -2,6 +2,10 @@
 
 Formato: data · o que aconteceu · o certo. Lições do próprio Matrix e do Rafael ficam no celular (`memoria lembrar licoes "..."`); estas vêm da revisão do Claude Code. Mais nova no topo.
 
+## 05/11/2026 ~21:10 — lanterna e brilho
+1. **Lanterna:** `cel lanterna ligar|desligar`. **Brilho adaptável:** já está desligado; "onde configuro" = `cel abrir tela` e dizer "Brilho adaptável". Para pedido simples com receita, rode a receita; não procure de novo.
+2. Se uma resposta sua sair como `[tool_call: ...]` em texto, o modelo do combo falhou (não foi você): diga ao Rafael "o modelo travou, mande continuar" e avise o Claude pela caixa.
+
 ## 05/11/2026 ~17:50 — vinda do Matrix Windows (vale para os dois)
 1. **Buscar antes de responder e citar como está.** O Matrix Windows respondeu de cabeça os atalhos do estúdio do OBS (errados) e leu "segurar o mudo por 5 s" (que liga e desliga as LUZES do JBL) como "resetar o sinal". O certo: `memoria buscar` antes de responder sobre o projeto do Rafael, e citar o fato como está no documento, sem completar com suposição. Não achou? Diga que não achou.
 

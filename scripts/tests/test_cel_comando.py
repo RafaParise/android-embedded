@@ -219,6 +219,21 @@ def test_acordado_liga_e_desliga_o_permanecer_acordado(cel):
     assert cel.roda("acordado", "sempre")[0] == 2
 
 
+def test_lanterna_usa_o_termux_api_sem_depuracao(cel):
+    (cel.dir / "bin" / "termux-torch").write_text('#!/bin/bash\necho "torch $*" >> "$FALSO_LOG"\n')
+    (cel.dir / "bin" / "termux-torch").chmod(0o755)
+    assert cel.roda("lanterna", "ligar")[0] == 0  # sem depuracao sem fio: o Termux:API nao precisa dela
+    assert cel.roda("lanterna", "desligar")[0] == 0
+    reg = cel.registro()
+    assert "torch on" in reg and "torch off" in reg and "SHELL" not in reg
+    assert cel.roda("lanterna", "piscar")[0] == 2
+
+
+def test_lanterna_sem_termux_api_explica(cel):
+    rc, s = cel.roda("lanterna", "ligar")
+    assert rc == 1 and "Termux:API" in s
+
+
 def test_tela_apagar_usa_os_botoes_da_vigia_e_confere_a_camada(cel):
     _conectado(cel)
     rc, s = cel.roda("tela", "apagar")

@@ -2,6 +2,7 @@
 # saida - liga e desliga a SAIDA DE INTERNET PELO PC (Tailscale "exit node") e VIGIA: se o PC some, ou se a internet para de
 # passar por ele, o guarda desliga a saida e a internet volta sozinha (direto pelo Wi-Fi ou pelos dados); quando o PC volta,
 # o guarda religa a saida, conferindo antes que a internet passa. Decidido em 01/11 (memoria/VPN-SEMPRE-ATIVA.md).
+# Hotspot ligado = saida PAUSADA (05/11): os apps falam direto com os aparelhos do hotspot; religa quando ele desligar.
 #   saida ligar [--sem-lan] [--vigilia]       confere o PC e a internet, liga a saida e deixa o guarda vigiando
 #   saida desligar                            desliga a saida e para o guarda
 #   saida status                              o que esta ligado, o guarda, o PC e a internet
@@ -63,6 +64,32 @@ manda_saida() {
 }
 # espera a rota trocar e confere a internet ate 3 vezes
 internet_depois() { sleep "$ESPERA"; internet_ok && return 0; sleep "$PAUSA"; internet_ok && return 0; sleep "$PAUSA"; internet_ok; }
+# Hotspot (ou ancoragem USB/Bluetooth) ligado = a interface dele tem endereco IPv4. O Termux nao le /sys nem /proc/net, mas o
+# getifaddrs da libc funciona. Com a saida pelo PC ligada, o que um app do celular INICIA para um aparelho do hotspot vai para o
+# tunel e se perde (a Tailscale so deixa de fora a rede do Wi-Fi): por isso a saida fica pausada enquanto o hotspot existir.
+hotspot_ligado() {
+  python3 - <<'PY' 2>/dev/null
+import ctypes, socket, sys
+class SA(ctypes.Structure):
+    _fields_ = [("fam", ctypes.c_ushort), ("dados", ctypes.c_ubyte * 14)]
+class IFA(ctypes.Structure):
+    pass
+IFA._fields_ = [("prox", ctypes.POINTER(IFA)), ("nome", ctypes.c_char_p), ("flags", ctypes.c_uint), ("end", ctypes.POINTER(SA)),
+                ("masc", ctypes.c_void_p), ("bc", ctypes.c_void_p), ("extra", ctypes.c_void_p)]
+libc = ctypes.CDLL(None)
+p = ctypes.POINTER(IFA)()
+if libc.getifaddrs(ctypes.byref(p)) != 0:
+    sys.exit(1)
+achou = False
+while p:
+    a = p.contents
+    nome = (a.nome or b"").decode()
+    if a.end and a.end.contents.fam == socket.AF_INET and nome.startswith(("swlan", "softap", "ap0", "rndis", "bt-pan")):
+        achou = True
+    p = a.prox
+sys.exit(0 if achou else 1)
+PY
+}
 prende_vigilia() { command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock >/dev/null 2>&1; return 0; }
 solta_vigilia() { command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock >/dev/null 2>&1; return 0; }
 
@@ -101,6 +128,19 @@ ciclo() {
   local lan agora n o e prox
   lan=$(cat "$RUN/desejada" 2>/dev/null); [ "$lan" = false ] || lan=true
   agora=$(date +%s)
+  if hotspot_ligado; then
+    # hotspot ligado: saida pausada (os aparelhos do hotspot falam direto com o celular; a internet ja e a dos dados moveis)
+    if [ ! -f "$RUN/hotspot" ] && manda_saida "" "$lan"; then
+      : > "$RUN/hotspot"
+      log "hotspot ligado: saida pelo PC PAUSADA (apps do celular falam direto com os aparelhos do hotspot)"
+    fi
+    return 0
+  fi
+  if [ -f "$RUN/hotspot" ]; then
+    # hotspot desligado: volta pelo caminho normal de religar (confere o PC e a internet antes)
+    rm -f "$RUN/hotspot" "$RUN/proxima" "$RUN/espera"; echo "$agora" > "$RUN/suspensa"; echo 0 > "$RUN/oks"
+    log "hotspot desligado: religando a saida pelo PC"
+  fi
   if [ ! -f "$RUN/suspensa" ]; then
     # saida em uso: se a internet parar por FALHAS testes seguidos, desliga a saida (a internet volta direto)
     if internet_ok; then echo 0 > "$RUN/falhas"; return 0; fi
@@ -152,6 +192,15 @@ cmd_ligar() {
       *) echo "Opcao desconhecida: $a (use: saida ligar [--sem-lan] [--vigilia])"; return 2 ;;
     esac
   done
+  if hotspot_ligado; then
+    printf '%s\n' "$lan" > "$RUN/desejada"; : > "$RUN/hotspot"
+    rm -f "$RUN/suspensa" "$RUN/proxima" "$RUN/espera"; echo 0 > "$RUN/falhas"; echo 0 > "$RUN/oks"
+    if [ "$vig" = 1 ]; then : > "$RUN/vigilia"; else rm -f "$RUN/vigilia"; fi
+    log "saida pedida com o hotspot ligado: fica PAUSADA ate o hotspot desligar"
+    inicia_laco || { echo "O guarda nao subiu (veja: saida log). Rode: saida guarda"; return 1; }
+    echo "Hotspot ligado: a saida pelo PC fica PAUSADA (os aparelhos do hotspot falam direto com o celular). O guarda liga sozinho quando o hotspot desligar."
+    return 0
+  fi
   if ! pc_responde; then echo "O PC nao respondeu pela Tailscale ($PC_IP): ligar a saida deixaria o celular sem internet. Nada foi mudado."; return 1; fi
   if ! internet_ok; then echo "O celular ja esta sem internet agora: nao da para testar a saida. Nada foi mudado."; return 1; fi
   if ! manda_saida "$NO" "$lan"; then echo "O app da Tailscale nao aceitou o pedido (veja: saida log). Nada foi mudado."; return 1; fi
@@ -173,7 +222,7 @@ cmd_ligar() {
 }
 
 cmd_desligar() {
-  rm -f "$RUN/desejada" "$RUN/suspensa" "$RUN/proxima" "$RUN/espera" "$RUN/falhas" "$RUN/oks"
+  rm -f "$RUN/desejada" "$RUN/suspensa" "$RUN/proxima" "$RUN/espera" "$RUN/falhas" "$RUN/oks" "$RUN/hotspot"
   para_laco
   if manda_saida "" true; then
     log "saida pelo PC desligada por voce"
@@ -200,7 +249,8 @@ cmd_vigilia() {
 cmd_status() {
   local p t
   if [ -f "$RUN/desejada" ]; then echo "Saida pelo PC: PEDIDA (ligada por voce)"; else echo "Saida pelo PC: nao pedida (para ligar: saida ligar)"; fi
-  if [ -f "$RUN/suspensa" ]; then
+  if [ -f "$RUN/hotspot" ]; then echo "  >> PAUSADA: hotspot ligado (os aparelhos do hotspot falam direto com o celular); volta quando ele desligar"
+  elif [ -f "$RUN/suspensa" ]; then
     t=$(( $(date +%s) - $(le_num suspensa) ))
     echo "  >> SUSPENSA pelo guarda ha ${t}s: a internet sai direto; ele religa quando o PC voltar"
   fi

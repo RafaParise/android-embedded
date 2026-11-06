@@ -7,6 +7,7 @@
 #   cel tela apagar|acender|status  escurece SEM bloquear (depuracao segue; acende com dois toques ou volume para cima)
 #   cel economia-dados ligar|desligar|status   Economia de dados do Android (sem dado em segundo plano no 4G; nao comprime)
 #   cel acordado ligar|desligar|status         Permanecer acordado enquanto carrega (tela nao apaga no cabo)
+#   cel lanterna ligar|desligar                Lanterna (Termux:API; funciona sem a depuracao sem fio)
 #   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados em segundo plano
 #   cel abrir TELA | cel telas      abre a tela de configuracao (wifi, bluetooth, tela, som, bateria, apps, armazenamento, desenvolvedor...)
 #   cel abrir-app PACOTE · cel apps [texto] · cel procurar TEXTO (arquivos, apps e configuracoes)
@@ -345,6 +346,13 @@ case "${1:-status}" in
       desligar) precisa; sh_ "cmd netpolicy set restrict-background false" >/dev/null; echo "Economia de dados desligada." ;;
       status) precisa; echo "Economia de dados: $(sh_ 'cmd netpolicy get restrict-background' | tr -d '\r')" ;;
       *) echo "Use: cel economia-dados ligar|desligar|status"; exit 2 ;;
+    esac ;;
+  lanterna) # Lanterna pelo Termux:API (nao precisa da depuracao sem fio)
+    command -v termux-torch >/dev/null 2>&1 || { echo "Falta o termux-torch (pkg install termux-api e o app Termux:API)."; exit 1; }
+    case "${2:-}" in
+      ligar) termux-torch on && echo "Lanterna ligada (desligar: cel lanterna desligar)." ;;
+      desligar) termux-torch off && echo "Lanterna desligada." ;;
+      *) echo "Use: cel lanterna ligar|desligar"; exit 2 ;;
     esac ;;
   acordado) # Permanecer acordado: a tela nao apaga enquanto carrega (7 = cabo, carregador e sem fio; 0 = normal)
     case "${2:-status}" in

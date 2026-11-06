@@ -71,6 +71,8 @@ class Ambiente:
         self.log = self.estado / "log.txt"
         self.log.write_text("")
         falsos = (("curl", FALSO_CURL), ("am", FALSO_AM),
+                  # o hotspot e lido pelo python3 (getifaddrs); aqui ele so responde pelo arquivo "hotspot" do mundo falso
+                  ("python3", '#!/bin/bash\necho python3 >> "$FAKE_LOG"\n[ -e "$FAKE_ESTADO/hotspot" ]\n'),
                   ("termux-wake-lock", '#!/bin/bash\necho wake-lock >> "$FAKE_LOG"\n'),
                   ("termux-wake-unlock", '#!/bin/bash\necho wake-unlock >> "$FAKE_LOG"\n'))
         for nome, texto in falsos:
@@ -82,9 +84,10 @@ class Ambiente:
             (self.util / nome).symlink_to(real)
         self.mundo(wifi=True, pc=True)
 
-    def mundo(self, wifi=None, pc=None, exit_on=None, exit_quebrada=None, sem_internet=None, portal=None, am_falha=None, rc_pc=None):
+    def mundo(self, wifi=None, pc=None, exit_on=None, exit_quebrada=None, sem_internet=None, portal=None, am_falha=None, rc_pc=None,
+              hotspot=None):
         for nome, v in (("wifi_up", wifi), ("pc_up", pc), ("exit_on", exit_on), ("exit_quebrada", exit_quebrada),
-                        ("sem_internet", sem_internet), ("portal", portal), ("am_falha", am_falha)):
+                        ("sem_internet", sem_internet), ("portal", portal), ("am_falha", am_falha), ("hotspot", hotspot)):
             if v is None:
                 continue
             f = self.estado / nome
@@ -643,3 +646,51 @@ def test_o_laco_de_verdade_suspende_quando_o_pc_some_e_religa_quando_volta(amb):
     assert amb.espera(lambda: amb.arq("suspensa") is None, 20), (amb.run / "saida.log").read_text(encoding="utf-8")
     assert (amb.estado / "exit_on").exists()
     assert amb.am()[0] == ("rafaparise", "true") and amb.am()[-1] == ("rafaparise", "true")
+
+
+# ---- hotspot (05/11): com a saida pelo PC ligada, o que um app do celular INICIA para um aparelho do hotspot vai para o
+# tunel e se perde (o Tailscale so deixa de fora a rede do Wi-Fi). Enquanto o hotspot estiver ligado, a saida fica PAUSADA.
+
+def test_hotspot_ligado_pausa_a_saida_e_desligado_religa(amb):
+    amb.pede()
+    amb.mundo(exit_on=True)
+    amb.mundo(hotspot=True)
+    amb.ciclos(1)
+    assert amb.am()[-1] == ("", "true") and amb.arq("hotspot") is not None
+    assert "hotspot" in amb.roda("log")[1]
+    amb.ciclos(2)  # enquanto o hotspot segue ligado, nada de novo
+    assert len(amb.am()) == 1
+    amb.mundo(hotspot=False)
+    amb.ciclos(2 + 1)  # OKS=2 testes com o PC respondendo e religa
+    assert amb.am()[-1] == ("rafaparise", "true")
+    assert amb.arq("hotspot") is None and amb.arq("suspensa") is None
+
+
+def test_hotspot_pausa_mesmo_com_a_saida_ja_suspensa(amb):
+    amb.pede()
+    amb.suspende()
+    amb.mundo(hotspot=True, pc=True)
+    amb.ciclos(3)
+    assert all(nome == "" for nome, _ in amb.am())  # nunca religa com o hotspot ligado
+
+
+def test_ligar_com_hotspot_ligado_fica_pausada(amb):
+    amb.mundo(hotspot=True)
+    rc, out = amb.roda("ligar")
+    assert rc == 0 and "hotspot" in out.lower()
+    assert amb.arq("desejada") == "true" and amb.arq("hotspot") is not None
+    assert all(nome == "" for nome, _ in amb.am())
+
+
+def test_status_mostra_a_pausa_do_hotspot(amb):
+    amb.pede()
+    amb.mundo(hotspot=True)
+    amb.ciclos(1)
+    assert "hotspot" in amb.roda("status")[1].lower()
+
+
+def test_sem_hotspot_o_guarda_segue_igual(amb):
+    amb.pede()
+    amb.mundo(exit_on=True)
+    amb.ciclos(3)
+    assert amb.am() == [] and amb.arq("hotspot") is None
