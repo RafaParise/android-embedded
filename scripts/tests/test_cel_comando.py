@@ -347,3 +347,48 @@ def test_palavra_perigosa_em_texto_comum_nao_trava_a_tela(cel):
     assert rc == 0 and "SHELL input tap 120 650" in cel.registro()
     rc, s = cel.roda("tocar", "Formatar numeros de telefone")
     assert rc == 3
+
+
+CURL_OBS = r"""#!/bin/bash
+echo "curl $*" >> "$FALSO_LOG"
+for a in "$@"; do case "$a" in
+  */saude) printf 200; exit 0 ;;
+  */mcp) cat > "$FALSO_DIR/curl-config"
+         printf '%s' '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"acao\": \"x\", \"saida\": \"camera virtual ligada agora\nPRONTO\"}"}],"isError":false}}'
+         exit 0 ;;
+esac; done
+exit 7
+"""
+
+
+def _ponte_obs(cel):
+    (cel.dir / "home" / ".qwen").mkdir(parents=True, exist_ok=True)
+    (cel.dir / "home" / ".qwen" / ".env").write_text("PONTE_PC_TOKEN=token-de-teste-" + "x" * 30 + "\n")
+    (cel.dir / "bin" / "curl").write_text(CURL_OBS)
+    (cel.dir / "bin" / "curl").chmod(0o755)
+    (cel.dir / "bin" / "python3").unlink()
+    (cel.dir / "bin" / "python3").symlink_to("/usr/bin/python3")
+
+
+@pytest.mark.parametrize("sub,acao", [("camera", "obs-camera-ligar"), ("frontal", "obs-camera-frontal"), ("tela", "obs-tela-ligar"),
+                                      ("gravar", "obs-gravar-camera"), ("gravar-tela", "obs-gravar-tela"),
+                                      ("parar-gravacao", "obs-parar-gravacao"), ("desligar", "obs-desligar"), ("status", "obs-status"),
+                                      ("live", "obs-live-iniciar"), ("parar-live", "obs-live-parar")])
+def test_obs_pede_a_acao_certa_ao_pc_e_mostra_a_saida(cel, sub, acao):
+    _ponte_obs(cel)
+    rc, s = cel.roda("obs", sub)
+    assert rc == 0, s
+    assert "camera virtual ligada agora" in s
+    assert f'"nome":"{acao}"' in cel.registro()
+    assert "token-de-teste" not in cel.registro(), "o token vai pela entrada padrao do curl"
+
+
+def test_obs_sem_pc_explica_e_uso_errado_nao_chama(cel):
+    (cel.dir / "bin" / "curl").write_text("#!/bin/bash\necho \"curl $*\" >> \"$FALSO_LOG\"\nexit 7\n")
+    (cel.dir / "bin" / "curl").chmod(0o755)
+    (cel.dir / "home" / ".qwen").mkdir(parents=True)
+    (cel.dir / "home" / ".qwen" / ".env").write_text("PONTE_PC_TOKEN=t" + "x" * 30 + "\n")
+    rc, s = cel.roda("obs", "camera")
+    assert rc == 1 and "PC nao respondeu" in s
+    rc, s = cel.roda("obs", "apagar-tudo")
+    assert rc == 2 and "/mcp" not in cel.registro().split("apagar-tudo")[-1]

@@ -47,3 +47,12 @@ Pedido do Rafael: transformar o telefone em webcam com o que ele já tem, e um r
 ## Antivírus
 
 Em `ANTIVIRUS.md`.
+
+## 06/11: aula, gravação e live, de perto ou de longe
+- Atalho "Celular no OBS" (área de trabalho, serve pelo aFreeRDP) ou, do celular, `cel obs camera|frontal|tela|gravar|gravar-tela|parar-gravacao|live|parar-live|desligar|status`.
+- A câmera virtual liga sozinha, também com o OBS do Estúdio aberto (05/11 ela estava desligada na aula e o site só mostrava o logo).
+- Site da aula sem câmera ou sem compartilhar a tela: `pwsh -File scripts\pc-permissoes-aula.ps1` (estado) e `-Aplicar` como administrador.
+- A TELA do celular: `--tela` (scrcpy `--video-source=display`, sem controle pelo PC); `--som` leva o som do aparelho (na câmera, o microfone, que fica mudo sem fone).
+- Gravações em `D:\Vídeos\Celular OBS` (MP4 híbrido, AMF). Live: destino e chave no OBS do PC, perfil "Webcam Celular" (o Rafael configura uma vez).
+- Aviso fixo na barra do celular enquanto estiver no OBS (câmera, tela, GRAVANDO, AO VIVO), com botões Desligar e Parar gravação.
+- Limites: o OBS 32.1.2 cai ao fechar (o script já contorna); nos dados, ~900 MB por hora a 2 Mbit/s.

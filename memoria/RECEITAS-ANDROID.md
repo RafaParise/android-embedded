@@ -4,6 +4,35 @@ O Claude escreve; chega ao Matrix como `pc-receitas-android` e vale sem internet
 Tudo pelo `cel` (porta 5555 do adb: qualquer rede). Marcas: [Conferido 05/11] = o comando existe neste aparelho
 (consulta, sem mudar nada); [Sem conferir] = documentação do Android, testar antes de confiar.
 
+## Pedido direto = comando direto (regra do Rafael, 05/11: "ativar apenas falando, sem ficar procurando")
+Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, e mostre a saída real.
+| Ele fala | Você roda |
+|---|---|
+| "câmera do celular na aula", "vira webcam do PC" | `cel obs camera` (selfie: `cel obs frontal`); no site: "OBS Virtual Camera" |
+| "grava a câmera", "grava um vídeo no PC" | `cel obs gravar` |
+| "grava a minha tela" | `cel obs gravar-tela` |
+| "para de gravar", "salva" | `cel obs parar-gravacao` |
+| "começa a live" / "para a live" | `cel obs tela` (ou `camera`) e `cel obs live` / `cel obs parar-live` |
+| "desliga a câmera do PC", "desliga tudo do OBS" | `cel obs desligar` |
+| "o que está ligado no PC?" | `cel obs status` |
+| "manda minha tela para a TV/aluno", "compartilha esse arquivo/app" | `link tela` / `link arquivo CAMINHO` / `link app PACOTE`; `link parar` |
+| "liga/desliga a lanterna" | `cel lanterna ligar` / `cel lanterna desligar` |
+| "apaga/acende a tela" | `cel tela apagar` / `cel tela acender` |
+| "tela acesa no carregador" | `cel acordado ligar` / `desligar` |
+
+## Celular no OBS do PC: aula, gravação e live [Provado 05/11 ~22:15, pedido pelo próprio celular]
+- O que é: a câmera OU a tela do celular entram no OBS do PC (scrcpy; cabo, Wi-Fi ou dados móveis pela Tailscale), e o OBS
+  as entrega como "OBS Virtual Camera" (site da aula, Meet, Teams), grava em `D:\Vídeos\Celular OBS` (MP4) ou faz live.
+- Do celular: `cel obs camera|frontal|tela|gravar|gravar-tela|parar-gravacao|live|parar-live|desligar|status` (vai pela ponte do PC).
+- Do PC ou pelo aFreeRDP: atalho "Celular no OBS" na área de trabalho (menu de 1 a 9).
+- A câmera virtual liga SOZINHA, mesmo com o OBS do Estúdio já aberto, e a cena no ar passa para a da webcam
+  (05/11: na aula ela estava desligada e o site só mostrava o logo do OBS com a câmera riscada).
+- Site sem câmera ou sem "compartilhar tela": o Windows estava NEGANDO câmera e captura de tela (o microfone, permitido,
+  funcionava). Liberado em 05/11; se voltar, `cel obs status` avisa e o Claude roda `pc-permissoes-aula.ps1 -Aplicar`.
+- Nos dados móveis a câmera gasta ~900 MB por hora: avise antes. Modo câmera escurece a tela do celular (a câmera continua).
+- `gravar-tela` leva o som do celular; o microfone do celular fica MUDO sem fone (privacidade, `cel microfone status`).
+- Live: o destino e a chave ficam no OBS do PC (o Rafael configura uma vez); nunca peça nem grave a chave.
+
 ## Regra de ouro para operar qualquer app (o "olho e dedo")
 1. `cel abrir-app PACOTE` (ache o pacote: `cel apps texto`), ou `cel abrir TELA` para Configurações.
 2. `cel ler` lista o que há na tela, numerado, com o centro de cada item. `cel ler TEXTO` filtra.

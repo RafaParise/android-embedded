@@ -98,6 +98,17 @@ ACOES_PC = {
     "depuracao-sem-fio-status": ("diz se a Depuracao por Wi-Fi do celular esta ligada (pelo cabo)", "depuracao-sem-fio.py", "status"),
     "ia-pc-ollama-abrir": ("abre a porta do Ollama do PC SO para a tailnet (sem senha), para o Matrix usar o modelo do PC sem a nuvem", "ia-do-pc.ps1", "-AbrirOllama"),
     "ia-pc-ollama-fechar": ("fecha de novo a porta do Ollama do PC", "ia-do-pc.ps1", "-FecharOllama"),
+    # Celular no OBS do PC (05/11): webcam da aula, gravacao e live, por cabo, Wi-Fi ou dados moveis (o script acha o caminho)
+    "obs-camera-ligar": ("camera traseira do celular vira a OBS Virtual Camera do PC (aula, Meet, Teams); camera virtual liga sozinha", "webcam-celular.py", "iniciar"),
+    "obs-camera-frontal": ("o mesmo com a camera FRONTAL (selfie)", "webcam-celular.py", "iniciar", "--frontal"),
+    "obs-tela-ligar": ("a TELA do celular no OBS do PC (para mostrar ou transmitir)", "webcam-celular.py", "iniciar", "--tela"),
+    "obs-gravar-camera": ("grava no PC o video da camera do celular (liga a camera se precisar); arquivo em D:/Videos/Celular OBS", "webcam-celular.py", "gravar"),
+    "obs-gravar-tela": ("grava no PC a TELA do celular com o som do aparelho", "webcam-celular.py", "iniciar", "--tela", "--som", "--gravar"),
+    "obs-parar-gravacao": ("para a gravacao e salva o arquivo (camera ou tela continuam ligadas)", "webcam-celular.py", "parar-gravacao"),
+    "obs-desligar": ("desliga camera ou tela do celular no PC (salva a gravacao, devolve o OBS, acende a tela)", "webcam-celular.py", "parar"),
+    "obs-status": ("o que esta ligado: celular no OBS, camera virtual, gravacao, live e permissoes do Windows", "webcam-celular.py", "status"),
+    "obs-live-iniciar": ("comeca a LIVE no OBS do PC (destino e chave que o Rafael configurou no OBS)", "webcam-celular.py", "live"),
+    "obs-live-parar": ("encerra a live", "webcam-celular.py", "parar-live"),
 }
 MAX_NAVEGADOR_POR_MINUTO = 6                        # a ferramenta navegador_ler abre um navegador sem tela a cada chamada
 
@@ -867,7 +878,7 @@ class Ponte:
             descricao, script, *args = ACOES_PC[nome]
             # Sem cabo, o PC alcanca o celular pela Tailscale (porta 5555, autorizada pelo Rafael em 05/11) SO durante a acao.
             remoto = False
-            if not nome.startswith("ia-pc-"):
+            if not nome.startswith(("ia-pc-", "obs-")):  # obs-*: o webcam-celular.py escolhe cabo, Wi-Fi ou Tailscale e solta sozinho
                 try:
                     g = self._executa([sys.executable, "-B", str(self.projeto / "scripts" / "adb-remoto.py"), "garantir"], capture_output=True, text=True,
                                       timeout=40, cwd=str(self.projeto), stdin=subprocess.DEVNULL, creationflags=0x08000000 if os.name == "nt" else 0)

@@ -254,3 +254,66 @@ def test_fechar_sem_fio_pede_o_cabo(wc, monkeypatch):
     assert ["adb", "-s", "RQ8", "usb"] in a.chamadas
     monkeypatch.setattr(subprocess, "run", Adb(devices=""))
     assert wc.main(["fechar-sem-fio"]) == 2
+
+
+# ---------------------------------------------------------------- 05/11: tela, som, aviso no celular, sentinela, fundo
+def test_tela_usa_display_sem_controle_e_som_do_aparelho(wc):
+    a = wc.args_scrcpy("S", tipo="dados", fonte="tela", som=True)
+    assert "--video-source=display" in a and "--no-control" in a and "--audio-source=output" in a
+    assert "--no-audio" not in a and not any(x.startswith("--camera") for x in a)
+    c = wc.args_scrcpy("S", fonte="camera", som=True, lanterna=True)
+    assert "--audio-source=mic" in c and "--camera-torch" in c
+    assert "--camera-torch" not in wc.args_scrcpy("S", fonte="tela", lanterna=True)
+
+
+@pytest.mark.parametrize("fonte,grav,live,icone,palavra", [
+    ("camera", False, False, "videocam", "camera"), ("tela", False, False, "screen_share", "tela"),
+    ("tela", True, False, "fiber_manual_record", "GRAVANDO"), ("camera", True, True, "live_tv", "AO VIVO")])
+def test_aviso_muda_com_o_estado(wc, fonte, grav, live, icone, palavra):
+    i, titulo, _ = wc.texto_aviso(fonte, grav, live)
+    assert i == icone and palavra.lower() in titulo.lower()
+    cmd = wc.comando_aviso(fonte, grav, live)
+    assert cmd.startswith("timeout 20 termux-notification --id obs-pc --ongoing") and "obs desligar" in cmd
+    assert ("parar-gravacao" in cmd) == grav
+    assert "'" not in titulo and "'" not in wc.texto_aviso(fonte, grav, live)[2], "aspas simples quebrariam o comando"
+
+
+def test_tirar_o_aviso(wc):
+    assert wc.comando_aviso("camera", tirar=True) == "timeout 20 termux-notification-remove obs-pc"
+
+
+def test_aviso_sem_ssh_nao_tenta_e_nao_quebra(wc, monkeypatch, tmp_path):
+    monkeypatch.setattr(wc, "SSH", tmp_path / "nao-existe.exe")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("chamou programa sem ssh"))
+    assert wc.aviso_celular("S", "camera") is False
+    assert wc.aviso_celular("", "camera") is False
+
+
+def test_limpa_sentinela_tira_so_os_marcadores(wc, tmp_path):
+    s = tmp_path / ".sentinel"
+    s.mkdir()
+    (s / "run_1").write_text("")
+    (s / "run_2").write_text("")
+    (s / "outro").write_text("")
+    assert wc.limpa_sentinela(tmp_path) == 2
+    assert [f.name for f in s.iterdir()] == ["outro"]
+    assert wc.limpa_sentinela(tmp_path / "nao-tem") == 0
+
+
+def test_perfil_grava_em_mp4_hibrido_na_pasta_dada(wc):
+    ini = wc.perfil_ini("D:/X/Celular OBS")
+    assert "FilePath=D:/X/Celular OBS" in ini and "RecFormat2=hybrid_mp4" in ini and "Mode=Simple" in ini
+
+
+def test_colecao_tem_o_som_so_da_janela_do_scrcpy(wc):
+    fontes = {s["name"]: s for s in wc.colecao()["sources"]}
+    assert fontes["Som do celular"]["id"] == "wasapi_process_output_capture"
+    assert "scrcpy.exe" in fontes["Som do celular"]["settings"]["window"]
+
+
+def test_comandos_novos_sem_fundo_ligado(wc, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(wc, "ESTADO", tmp_path / "e.json")
+    monkeypatch.setattr(wc, "PARAR", tmp_path / "p")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="List of devices attached\n", stderr=""))
+    assert wc.main(["parar"]) == 0
+    assert "Nada ligado" in capsys.readouterr().out

@@ -7,6 +7,12 @@
   python scripts/webcam-celular.py ligar [--frontal] [--sem-fio] [--tamanho 1280x720] [--fps 30]
   python scripts/webcam-celular.py provar [--sem-fio]   liga, mede pela camera virtual (com a lanterna, sem olhar a imagem) e desliga
   python scripts/webcam-celular.py fechar-sem-fio       fecha a porta de rede do adb no celular (precisa do cabo)
+  De longe (acesso remoto, atalhos da area de trabalho ou o celular pela ponte), sem janela esperando Enter:
+  python scripts/webcam-celular.py iniciar [--tela] [--som] [--gravar] [--frontal]   liga em segundo plano e volta
+  python scripts/webcam-celular.py gravar | parar-gravacao | status | parar
+  --tela = a TELA do celular (gravar ou transmitir o que aparece nele); --som = microfone (camera) ou som do aparelho (tela).
+  A camera virtual do OBS liga SOZINHA, mesmo com o OBS do Estudio ja aberto (05/11: na aula ela estava desligada).
+  Gravacoes: D:/Videos/Celular OBS (MP4 hibrido). Live: o destino e a chave ficam no OBS (obs-controle.py transmitir).
 
 Com o OBS do Estudio ja aberto, so liga a camera: ela aparece nas cenas de webcam.
 Por que 720p: cabe inteira no monitor de 1440x900, sem reduzir a imagem na captura, e e o que a maioria das chamadas envia.
@@ -45,13 +51,36 @@ def pasta_obs():
     return pathlib.Path(os.environ["APPDATA"]) / "obs-studio"
 
 
-def args_scrcpy(serial="", frontal=False, tamanho="1280x720", fps=30, lanterna=False, tipo="cabo"):
+def args_scrcpy(serial="", frontal=False, tamanho="1280x720", fps=30, lanterna=False, tipo="cabo", fonte="camera", som=False):
+    """fonte "camera" (webcam) ou "tela" (a TELA do celular, para gravar ou transmitir pelo OBS; sem controle pelo PC).
+    som: microfone do celular (camera) ou o som do celular (tela) toca no PC e o OBS o pega pela janela do scrcpy."""
     largura, altura = tamanho.split("x")
-    a = ["scrcpy"] + (["-s", serial] if serial else []) + ["--video-source=camera", f"--camera-facing={'front' if frontal else 'back'}", f"--camera-size={tamanho}",
-         f"--camera-fps={fps}", f"--video-bit-rate={BITRATE[tipo]}", "--no-audio", f"--window-title={TITULO}", f"--window-width={largura}", f"--window-height={altura}", "--window-borderless"]
+    a = ["scrcpy"] + (["-s", serial] if serial else [])
+    if fonte == "tela":
+        a += ["--video-source=display", f"--max-size={max(int(largura), int(altura))}", f"--max-fps={fps}", "--no-control"]
+    else:
+        a += ["--video-source=camera", f"--camera-facing={'front' if frontal else 'back'}", f"--camera-size={tamanho}", f"--camera-fps={fps}"]
+    a += [f"--video-bit-rate={BITRATE[tipo]}"]
+    a += ([f"--audio-source={'output' if fonte == 'tela' else 'mic'}", "--audio-bit-rate=96K"] if som else ["--no-audio"])
+    a += [f"--window-title={TITULO}", f"--window-width={largura}", f"--window-height={altura}", "--window-borderless"]
     if tipo != "cabo":
         a.append("--video-buffer=50")  # folga pequena contra oscilacao da rede
-    return a + ["--camera-torch"] if lanterna else a
+    return a + ["--camera-torch"] if lanterna and fonte == "camera" else a
+
+
+def limpa_sentinela(base=None):
+    """Com o OBS FECHADO, tira os marcadores de execucao que sobram quando ele cai ao sair (o OBS 32.1.2 deste PC cai ao
+    fechar desde 03/11, sempre no mesmo ponto, depois de liberar tudo). Sobrando, a proxima abertura PARA na pergunta do
+    "Modo Seguro" e a camera virtual nao liga (visto em 05/11 22:18). Devolve quantos tirou."""
+    pasta = (base or pasta_obs()) / ".sentinel"
+    n = 0
+    for f in (pasta.glob("run_*") if pasta.is_dir() else []):
+        try:
+            f.unlink()
+            n += 1
+        except OSError:
+            pass
+    return n
 
 
 def args_obs():
@@ -66,17 +95,38 @@ def colecao():
         "sources": [
             {"id": "window_capture", "versioned_id": "window_capture", "name": "Janela scrcpy", "enabled": True,
              "settings": {"window": f"{TITULO}:SDL_app:scrcpy.exe", "method": 2, "priority": 1, "cursor": False, "client_area": True}},
+            # som do celular (so com --som): o scrcpy toca no PC e o OBS pega so o audio DESSA janela, nada do resto do PC
+            {"id": "wasapi_process_output_capture", "versioned_id": "wasapi_process_output_capture", "name": "Som do celular", "enabled": True,
+             "settings": {"window": f"{TITULO}:SDL_app:scrcpy.exe", "priority": 2}},
             {"id": "scene", "versioned_id": "scene", "name": "Celular", "enabled": True,
-             "settings": {"id_counter": 1, "custom_size": False, "items": [{
+             "settings": {"id_counter": 2, "custom_size": False, "items": [{
                  "name": "Janela scrcpy", "id": 1, "visible": True, "locked": False, "rot": 0.0, "align": 5, "scale_filter": "disable",
                  "pos": {"x": 0.0, "y": 0.0}, "scale": {"x": 1.0, "y": 1.0}, "bounds_type": 2, "bounds_align": 0,
-                 "bounds": {"x": 1280.0, "y": 720.0}}]}},
+                 "bounds": {"x": 1280.0, "y": 720.0}}, {
+                 "name": "Som do celular", "id": 2, "visible": True, "locked": False, "rot": 0.0, "align": 5,
+                 "pos": {"x": 0.0, "y": 0.0}, "scale": {"x": 1.0, "y": 1.0}, "bounds_type": 0, "bounds_align": 0,
+                 "bounds": {"x": 0.0, "y": 0.0}}]}},
         ],
     }
 
 
-PERFIL = ("[General]\nName=" + NOME + "\n\n[Video]\nBaseCX=1280\nBaseCY=720\nOutputCX=1280\nOutputCY=720\nFPSType=0\nFPSCommon=30\n"
-          "ColorFormat=NV12\nColorSpace=709\nColorRange=Partial\n\n[Audio]\nSampleRate=48000\nChannelSetup=Stereo\n")
+def pasta_gravacoes():
+    """D:\\Videos\\Celular OBS se o disco de dados existir; senao a pasta Videos do usuario."""
+    d = pathlib.Path("D:/Vídeos")
+    base = d if d.is_dir() else pathlib.Path(os.environ.get("USERPROFILE", str(pathlib.Path.home()))) / "Videos"
+    return base / "Celular OBS"
+
+
+def perfil_ini(pasta=None):
+    pasta = str(pasta or pasta_gravacoes()).replace("\\", "/")
+    # Gravacao: MP4 hibrido (nao corrompe se o PC desligar no meio, OBS 30.2+), na placa AMD (AMF), mesma qualidade da live
+    return ("[General]\nName=" + NOME + "\n\n[Output]\nMode=Simple\nFilenameFormatting=Celular %CCYY-%MM-%DD %hh-%mm-%ss\n\n"
+            "[SimpleOutput]\nFilePath=" + pasta + "\nRecFormat2=hybrid_mp4\nRecQuality=Stream\nStreamEncoder=amd\nVBitrate=4500\nABitrate=128\n\n"
+            "[Video]\nBaseCX=1280\nBaseCY=720\nOutputCX=1280\nOutputCY=720\nFPSType=0\nFPSCommon=30\n"
+            "ColorFormat=NV12\nColorSpace=709\nColorRange=Partial\n\n[Audio]\nSampleRate=48000\nChannelSetup=Stereo\n")
+
+
+PERFIL = perfil_ini("C:/Users/Videos/Celular OBS")  # so para os testes antigos; o real sai de perfil_ini()
 
 
 def prepara_obs(base=None):
@@ -87,7 +137,160 @@ def prepara_obs(base=None):
     cenas.mkdir(parents=True, exist_ok=True)
     perfil.mkdir(parents=True, exist_ok=True)
     (cenas / f"{ARQ}.json").write_text(json.dumps(colecao(), ensure_ascii=False, indent=1), encoding="utf-8")
-    (perfil / "basic.ini").write_text(PERFIL, encoding="utf-8")
+    (perfil / "basic.ini").write_text(perfil_ini(), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- OBS por comando (obs-controle.py) e permissoes do Windows
+AQUI = pathlib.Path(__file__).resolve().parent
+DIAG = AQUI.parent / "diagnostico"
+PARAR = DIAG / "webcam-celular.parar"
+ESTADO = DIAG / "webcam-celular.json"
+LOG = DIAG / "webcam-celular.log"
+
+
+def obsctl():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("obs_controle", AQUI / "obs-controle.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)  # type: ignore[union-attr]
+    return m
+
+
+def no_obs(acao, tentativas=1):
+    """Roda acao(modulo, obs) no OBS aberto; devolve o texto ou None (OBS fechado, websocket desligado). Nunca derruba a webcam."""
+    try:
+        m = obsctl()
+    except (OSError, SyntaxError):
+        return None
+    ultimo = None
+    for i in range(tentativas):
+        try:
+            with m.Obs(tempo=5) as o:
+                return acao(m, o)
+        except (m.ErroObs, OSError, ValueError) as e:
+            ultimo = e
+            if i + 1 < tentativas:
+                time.sleep(2)
+    print(f"AVISO: nao falei com o OBS ({ultimo}).")
+    return None
+
+
+def prepara_camera_virtual(tentativas=1):
+    """Camera virtual LIGADA e a cena no ar mostrando o celular (05/11: na aula ela estava desligada e o site so via o logo)."""
+    def acao(m, o):
+        cena, trocou = m.cena_com_webcam(o)
+        cam = m.camera_virtual(o, True)
+        return f"camera virtual {cam}; cena no ar: {cena}" + (" (troquei para ela)" if trocou else "")
+    r = no_obs(acao, tentativas)
+    if r:
+        print(r)
+    return r
+
+
+def grava_no_obs(acao="iniciar"):
+    def f(m, o):
+        if acao == "iniciar":
+            pasta = o.pede("GetRecordDirectory").get("recordDirectory", "")
+            if not pasta or not pathlib.Path(pasta).is_dir():
+                nova = pasta_gravacoes()
+                nova.mkdir(parents=True, exist_ok=True)
+                o.pede("SetRecordDirectory", {"recordDirectory": str(nova)})
+                print(f"a pasta de gravacao do OBS nao existia; agora: {nova}")
+        return m.gravar(o, acao)
+    r = no_obs(f, 3)
+    if r:
+        print(r)
+    return r
+
+
+# ---------------------------------------------------------------- aviso na barra do celular (pedido do Rafael, 05/11)
+SSH = pathlib.Path(r"C:\Program Files\Git\usr\bin\ssh.exe")
+CHAVE_TERMUX = pathlib.Path(os.environ.get("USERPROFILE", str(pathlib.Path.home()))) / ".ssh" / "a12_termux"
+PORTA_SSH_LOCAL = 8023  # a 8022 e do termux.ps1; esta e so do aviso
+CEL = "/data/data/com.termux/files/home/bin/cel"
+
+
+def texto_aviso(fonte, gravando=False, live=False):
+    """(icone, titulo, texto) do aviso fixo. O icone da barra e um dos prontos do Android (o Termux:API nao aceita imagem propria)."""
+    oque = "a TELA do celular" if fonte == "tela" else "a CAMERA do celular"
+    if live:
+        return "live_tv", "OBS do PC: AO VIVO", f"Transmitindo {oque}. Toque em Desligar para encerrar tudo."
+    if gravando:
+        return "fiber_manual_record", "OBS do PC: GRAVANDO", f"Gravando {oque} em D:/Videos/Celular OBS."
+    if fonte == "tela":
+        return "screen_share", "OBS do PC: tela do celular", "A tela vai para o OBS do PC (pronta para gravar ou transmitir)."
+    return "videocam", "OBS do PC: camera do celular", "Camera virtual do PC ligada (aula, Meet, Teams)."
+
+
+def comando_aviso(fonte, gravando=False, live=False, tirar=False):
+    if tirar:
+        return "timeout 20 termux-notification-remove obs-pc"
+    icone, titulo, texto = texto_aviso(fonte, gravando, live)
+    botoes = f"--button1 Desligar --button1-action '{CEL} obs desligar'"
+    if gravando:
+        botoes += f" --button2 'Parar gravacao' --button2-action '{CEL} obs parar-gravacao'"
+    return (f"timeout 20 termux-notification --id obs-pc --ongoing --alert-once --priority high --icon {icone} "
+            f"--title '{titulo}' --content '{texto}' {botoes}")
+
+
+def aviso_celular(serial, fonte="camera", gravando=False, live=False, tirar=False):
+    """Mostra (ou tira) o aviso fixo na barra do celular pelo SSH do Termux, pelo mesmo caminho do adb. Falhar nao derruba nada."""
+    if not serial or not SSH.exists() or not CHAVE_TERMUX.exists():
+        return False
+    try:
+        uid = re.search(r"userId=(\d+)", roda(["adb", "-s", serial, "shell", "dumpsys package com.termux | grep -m1 userId="], 20).stdout)
+        if not uid:
+            return False
+        usuario = f"u0_a{int(uid.group(1)) - 10000}"
+        roda(["adb", "-s", serial, "forward", f"tcp:{PORTA_SSH_LOCAL}", "tcp:8022"], 15)
+        try:
+            r = roda([str(SSH), "-i", str(CHAVE_TERMUX), "-p", str(PORTA_SSH_LOCAL), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+                      "-o", "ConnectTimeout=8", f"{usuario}@127.0.0.1", comando_aviso(fonte, gravando, live, tirar)], 40)
+            return r.returncode == 0
+        finally:
+            roda(["adb", "-s", serial, "forward", "--remove", f"tcp:{PORTA_SSH_LOCAL}"], 15)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def atualiza_aviso(**mudou):
+    """Para os comandos avulsos (gravar, parar-gravacao, live): atualiza o estado do modo de fundo e o aviso do celular."""
+    try:
+        e = json.loads(ESTADO.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    e.update(mudou)
+    try:
+        ESTADO.write_text(json.dumps(e, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+    aviso_celular(e.get("serial"), e.get("fonte", "camera"), e.get("gravando", False), e.get("live", False))
+
+
+def permissoes_negadas():
+    """Camera e captura de tela do Windows (o site da aula nao ve a camera nem compartilha a tela se estiverem em Negar)."""
+    try:
+        import winreg
+    except ImportError:
+        return []
+    base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
+    neg = []
+    for raiz, nome in ((winreg.HKEY_LOCAL_MACHINE, "HKLM"), (winreg.HKEY_CURRENT_USER, "HKCU")):
+        for c in ("webcam", "graphicsCaptureProgrammatic", "graphicsCaptureWithoutBorder"):
+            try:
+                with winreg.OpenKey(raiz, f"{base}\\{c}") as k:
+                    if winreg.QueryValueEx(k, "Value")[0] == "Deny":
+                        neg.append(f"{nome}\\{c}")
+            except OSError:
+                pass
+    return neg
+
+
+def avisa_permissoes():
+    neg = permissoes_negadas()
+    if neg:
+        print("AVISO: o Windows esta NEGANDO " + ", ".join(neg) + ": o site da aula fica sem camera ou sem compartilhar a tela.")
+        print("       Conserte (como administrador): pwsh -File scripts\\pc-permissoes-aula.ps1 -Aplicar")
 
 
 CHAVES = ("Profile", "ProfileDir", "SceneCollection", "SceneCollectionFile")
@@ -248,8 +451,25 @@ def imagem_real(medida):
     return medida["quadros"] >= 5 and medida["brilho"] >= BRILHO_MINIMO_LANTERNA
 
 
-def liga(frontal, tamanho, fps, provar, so_rede):
+def escreve_estado(**k):
+    try:
+        DIAG.mkdir(parents=True, exist_ok=True)
+        ESTADO.write_text(json.dumps({**k, "pid": os.getpid(), "hora": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def espera_parar(sc):
+    """Modo de fundo (acionado de longe): fica ate pedirem `parar` (arquivo PARAR) ou o scrcpy cair."""
+    while sc.poll() is None and not PARAR.exists():
+        time.sleep(1)
+    if sc.poll() is not None and not PARAR.exists():
+        print("o scrcpy caiu (rede ou celular): desligando tudo")
+
+
+def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False, fonte="camera", som=False):
     confere(tamanho)
+    avisa_permissoes()
     so_camera = obs_aberto()
     if so_camera and provar:
         raise Erro("feche o OBS antes da prova")
@@ -258,18 +478,39 @@ def liga(frontal, tamanho, fps, provar, so_rede):
     serial, tipo = escolhe_rota(so_rede)
     if not so_camera:
         prepara_obs()
-    sc = subprocess.Popen(args_scrcpy(serial, frontal, tamanho, fps, provar, tipo), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        limpa_sentinela()
+    if PARAR.exists():
+        PARAR.unlink()
+    sc = subprocess.Popen(args_scrcpy(serial, frontal, tamanho, fps, provar, tipo, fonte, som), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     obs = None
+    gravando = False
     try:
         time.sleep(4)
         if sc.poll() is not None:
             raise Erro("o scrcpy fechou ao abrir a camera: feche o Open Camera ou outro app que esteja usando a camera e tente de novo")
-        tela(serial, "apagar")  # poupa bateria; keyevent 223 bloqueava em 15 s
+        if fonte == "camera":
+            tela(serial, "apagar")  # poupa bateria; keyevent 223 bloqueava em 15 s (na TELA nao: gravaria preto)
         if so_camera:
-            print("\nCamera ligada: ela aparece nas cenas de webcam do OBS que esta aberto.")
+            print(f"\n{'Camera' if fonte == 'camera' else 'Tela do celular'} ligada no OBS que ja estava aberto.")
         else:
-            obs = subprocess.Popen(args_obs(), cwd=str(OBS_PADRAO.parent), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # O obs64.exe esta marcado "executar como administrador" (para capturar jogos elevados): sem isto a ponte e o atalho,
+            # que rodam sem elevacao, recebiam WinError 740. RunAsInvoker ignora a marca SO nesta abertura (camera, gravacao e live
+            # nao precisam de administrador); a marca do Rafael continua para quando ele abre o OBS do jeito dele.
+            obs = subprocess.Popen(args_obs(), cwd=str(OBS_PADRAO.parent), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   env={**os.environ, "__COMPAT_LAYER": "RunAsInvoker"})
             time.sleep(8)
+        if not provar:
+            prepara_camera_virtual(tentativas=4)
+        if gravar:
+            gravando = bool(grava_no_obs("iniciar"))
+        if not provar:  # icone fixo na barra do celular enquanto estiver no OBS (some ao desligar)
+            print("aviso na barra do celular: " + ("ligado" if aviso_celular(serial, fonte, gravando) else "nao deu (Termux fechado?)"))
+        if sem_espera:
+            escreve_estado(pronto=True, fonte=fonte, rota=tipo, gravando=gravando, live=False, obs_do_rafael=so_camera, serial=serial)
+            print("PRONTO")
+            sys.stdout.flush()
+            espera_parar(sc)
+            return 0
         if provar:
             m = mede_camera_virtual()
             print(f"camera virtual: {m['quadros']} quadros, {m['tamanho']}, brilho {m['brilho']} (com a lanterna)")
@@ -285,6 +526,9 @@ def liga(frontal, tamanho, fps, provar, so_rede):
         input()
         return 0
     finally:
+        # gravacao primeiro: fechar o OBS gravando abre uma pergunta na tela e o arquivo pode ficar sem o fim
+        if gravando or (obs is not None and not provar):
+            grava_no_obs("parar")
         # primeiro o que e do PC: com a rede fora, os comandos do celular demoram e nao podem deixar o OBS no perfil errado
         if obs is not None:
             try:
@@ -295,8 +539,17 @@ def liga(frontal, tamanho, fps, provar, so_rede):
             sc.terminate()
         if not so_camera:
             devolve_escolha(ini, antes)
-        tela(serial, "acender")
+        if not provar:
+            aviso_celular(serial, tirar=True)
+        if fonte == "camera":
+            tela(serial, "acender")
         desconecta(serial)
+        if sem_espera:
+            for f in (ESTADO, PARAR):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
 
 
 def fecha_sem_fio():
@@ -308,18 +561,130 @@ def fecha_sem_fio():
     return 0
 
 
+def em_fundo():
+    """Dados do modo de fundo, se o processo ainda estiver vivo."""
+    try:
+        e = json.loads(ESTADO.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    vivo = str(e.get("pid", "")) in roda(["tasklist", "/FI", f"PID eq {e.get('pid')}", "/NH"]).stdout
+    return e if vivo else None
+
+
+def iniciar(a):
+    """Liga em segundo plano (para o acesso remoto e para o celular pedir pela ponte) e volta assim que estiver pronto."""
+    e = em_fundo()
+    if e:
+        print(f"Ja esta ligado ({e.get('fonte')}, desde {e.get('hora')}).")
+        if a.gravar:
+            grava_no_obs("iniciar")
+        return 0
+    DIAG.mkdir(parents=True, exist_ok=True)
+    for f in (ESTADO, PARAR):
+        if f.exists():
+            f.unlink()
+    args = [sys.executable, "-B", str(pathlib.Path(__file__).resolve()), "ligar", "--sem-espera", "--tamanho", a.tamanho, "--fps", str(a.fps)]
+    args += [x for x, s in (("--frontal", a.frontal), ("--sem-fio", a.sem_fio), ("--gravar", a.gravar), ("--tela", a.tela), ("--som", a.som)) if s]
+    log = open(LOG, "w", encoding="utf-8")
+    flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0  # DETACHED, NEW_GROUP, NO_WINDOW
+    p = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags,
+                         env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"})
+    log.close()
+    for _ in range(90):
+        time.sleep(1)
+        texto = LOG.read_text(encoding="utf-8", errors="replace") if LOG.exists() else ""
+        if "PRONTO" in texto or p.poll() is not None:
+            print(texto.replace("PRONTO", "").strip())
+            if "PRONTO" in texto:
+                print(f"\nLigado em segundo plano. Para desligar: webcam-celular.py parar")
+                return 0
+            return 2
+    print("Ainda subindo depois de 90 s; confira com: webcam-celular.py status")
+    return 1
+
+
+def parar():
+    e = em_fundo()
+    if not e:
+        # o processo pode ter morrido sem a limpeza (PC desligado, sessao encerrada): tira o aviso que ficou no celular
+        lista = roda(["adb", "devices"]).stdout
+        serial = serial_usb(lista) or next((s for s in (f"{IP_TAILSCALE}:{PORTA}",) if f"{s}\tdevice" in lista), "")
+        if serial and aviso_celular(serial, tirar=True):
+            print("Tirei o aviso que tinha ficado na barra do celular.")
+        for f in (ESTADO, PARAR):
+            if f.exists():
+                f.unlink()
+        print("Nada ligado em segundo plano.")
+        return 0
+    PARAR.write_text("parar", encoding="utf-8")
+    for _ in range(60):
+        time.sleep(1)
+        if not em_fundo():
+            print("Desligado (gravacao salva, OBS devolvido ao perfil anterior, tela do celular acesa).")
+            return 0
+    print("Nao desligou em 60 s; o processo segue no PC.")
+    return 1
+
+
+def status():
+    e = em_fundo()
+    print(f"Celular no OBS: {'LIGADO (' + str(e.get('fonte')) + ' pela rota ' + str(e.get('rota')) + ', desde ' + str(e.get('hora')) + ')' if e else 'desligado'}")
+    if obs_aberto():
+        r = no_obs(lambda m, o: m.status(o))
+        if r:
+            print(r)
+    else:
+        print("OBS fechado.")
+    avisa_permissoes()
+    return 0
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Celular como webcam do PC")
-    ap.add_argument("modo", nargs="?", default="ligar", choices=["ligar", "provar", "fechar-sem-fio"])
+    ap = argparse.ArgumentParser(description="Celular (camera ou tela) no OBS do PC: webcam, gravacao e live, perto ou longe")
+    ap.add_argument("modo", nargs="?", default="ligar",
+                    choices=["ligar", "provar", "fechar-sem-fio", "iniciar", "parar", "status", "gravar", "parar-gravacao", "live", "parar-live"])
     ap.add_argument("--frontal", action="store_true")
     ap.add_argument("--sem-fio", action="store_true", help="usa a rede mesmo com o cabo ligado")
     ap.add_argument("--tamanho", default="1280x720")
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--tela", action="store_true", help="a TELA do celular em vez da camera")
+    ap.add_argument("--som", action="store_true", help="leva o som do celular (microfone na camera, som do aparelho na tela)")
+    ap.add_argument("--gravar", action="store_true", help="ja comeca gravando no PC")
+    ap.add_argument("--sem-espera", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     try:
         if a.modo == "fechar-sem-fio":
             return fecha_sem_fio()
-        return liga(a.frontal, a.tamanho, a.fps, a.modo == "provar", a.sem_fio)
+        if a.modo == "iniciar":
+            return iniciar(a)
+        if a.modo == "parar":
+            return parar()
+        if a.modo == "status":
+            return status()
+        if a.modo == "gravar":
+            if em_fundo() or obs_aberto():
+                if not em_fundo():
+                    print("AVISO: o OBS esta aberto mas o celular nao esta ligado nele por este script; gravo o que estiver no ar.")
+                if not grava_no_obs("iniciar"):
+                    return 1
+                atualiza_aviso(gravando=True)
+                return 0
+            a.gravar = True
+            return iniciar(a)
+        if a.modo == "parar-gravacao":
+            if not grava_no_obs("parar"):
+                return 1
+            atualiza_aviso(gravando=False)
+            return 0
+        if a.modo in ("live", "parar-live"):
+            liga_live = a.modo == "live"
+            r = no_obs(lambda m, o: m.transmitir(o, "iniciar" if liga_live else "parar"))
+            if not r:
+                return 1
+            print(r)
+            atualiza_aviso(live=liga_live and ("iniciada" in r or "ja estava" in r))
+            return 0
+        return liga(a.frontal, a.tamanho, a.fps, a.modo == "provar", a.sem_fio, a.sem_espera, a.gravar, "tela" if a.tela else "camera", a.som)
     except Erro as e:
         print("NAO LIGOU:", e)
         return 2

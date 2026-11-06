@@ -92,6 +92,27 @@ pede_ao_pc() { # $1 = acao da lista fechada da ponte do PC; o token vai pela ent
   printf 'header = "Authorization: Bearer %s"\n' "$tk" | curl -s -K - -m 60 -H 'Content-Type: application/json' -o /dev/null \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"acao_pc\",\"arguments\":{\"nome\":\"$1\"}}}" "$url/mcp" 2>/dev/null
 }
+pede_ao_pc_saida() { # como pede_ao_pc, mas devolve a saida da acao (texto do script do PC) para mostrar ao Rafael
+  local tk url="${PONTE_URL:-http://${IA_PC_IP:-100.64.0.1}:20130}" j
+  tk=$(grep -m1 '^PONTE_PC_TOKEN=' "$HOME/.qwen/.env" 2>/dev/null | cut -d= -f2-)
+  [ -n "$tk" ] && command -v curl >/dev/null 2>&1 || return 1
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 -m 8 "$url/saude" 2>/dev/null)" = 200 ] || return 1
+  j=$(printf 'header = "Authorization: Bearer %s"\n' "$tk" | curl -s -K - -m 200 -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"acao_pc\",\"arguments\":{\"nome\":\"$1\"}}}" "$url/mcp" 2>/dev/null) || return 1
+  printf '%s' "$j" | python3 -c '
+import json, sys
+try:
+    r = json.load(sys.stdin)
+    t = r["result"]["content"][0]["text"]
+    try:
+        d = json.loads(t)
+        print(d.get("saida") or d)
+    except ValueError:
+        print(t)
+except Exception:
+    print("resposta inesperada da ponte")
+'
+}
 PORTA_FIXA=5555
 fixa() { # porta 5555 (adb tcpip): vale em QUALQUER rede, inclusive dados moveis (autorizada pelo Rafael em 05/11); some ao reiniciar
   timeout 10 adb connect "127.0.0.1:$PORTA_FIXA" 2>/dev/null | grep -q "connected to" || return 1
@@ -398,6 +419,15 @@ case "${1:-status}" in
       echo "== configuracoes"; for ns in global secure system; do sh_ "settings list $ns" | tr -d '\r' | grep -i -- "$txt" | sed "s/^/$ns: /" | head -n 10; done
     fi
     echo "== telas"; for t in $TELAS; do case "${t%%:*}" in *"$txt"*) echo "cel abrir ${t%%:*}" ;; esac; done ;;
+  obs) # celular no OBS do PC (webcam da aula, gravar camera ou tela, live), pela ponte do PC; vale em qualquer rede
+    case "${2:-}" in
+      camera) a=obs-camera-ligar ;; frontal) a=obs-camera-frontal ;; tela) a=obs-tela-ligar ;;
+      gravar) a=obs-gravar-camera ;; gravar-tela) a=obs-gravar-tela ;; parar-gravacao) a=obs-parar-gravacao ;;
+      desligar) a=obs-desligar ;; status) a=obs-status ;; live) a=obs-live-iniciar ;; parar-live) a=obs-live-parar ;;
+      *) echo "Use: cel obs camera|frontal|tela|gravar|gravar-tela|parar-gravacao|desligar|status|live|parar-live"; exit 2 ;;
+    esac
+    r=$(pede_ao_pc_saida "$a") || { echo "O PC nao respondeu (ligado? Tailscale? ponte no ar? teste: ia status)."; exit 1; }
+    printf '%s\n' "$r" ;;
   tv)
     # 05/11: este A12 nao tem o Smart View (firmware) e o Miracast do Android fica indisponivel sem ele; o que
     # funciona e o ScreenStream (a tela vai para o navegador da TV ou do PC). O Miracast shortcut foi desativado.

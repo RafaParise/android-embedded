@@ -661,3 +661,21 @@ def test_acao_pc_ps1_roda_pelo_pwsh(mundo):
     mundo.ponte.acao_pc("ia-pc-status")
     (cmd, _), = ex.cmds
     assert cmd[:3] == ["pwsh", "-NoProfile", "-File"] and cmd[3].endswith("ia-do-pc.ps1") and cmd[4:] == ["-SoVerificar"]
+
+
+def test_acoes_do_obs_nao_mexem_no_adb_e_chamam_o_script_da_webcam(mundo):
+    for nome in ("obs-camera-ligar", "obs-gravar-tela", "obs-desligar"):
+        ex = _Exec("ok")
+        mundo.ponte._executa = ex
+        mundo.ponte.acao_pc(nome)
+        assert not [c for c, _ in ex.cmds if "adb-remoto.py" in " ".join(c)], nome
+        (cmd, _), = ex.cmds
+        assert str(mundo.proj / "scripts" / "webcam-celular.py") in cmd
+
+
+def test_acoes_do_obs_tem_lista_fechada_sem_argumento_livre(mundo):
+    obs = {k: v for k, v in mundo.m.ACOES_PC.items() if k.startswith("obs-")}
+    assert len(obs) == 10
+    for k, (desc, script, *args) in obs.items():
+        assert script == "webcam-celular.py" and desc
+        assert all(a.startswith("--") or a in ("iniciar", "gravar", "parar", "parar-gravacao", "status", "live", "parar-live") for a in args), k
