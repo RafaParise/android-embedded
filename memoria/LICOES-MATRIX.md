@@ -2,6 +2,13 @@
 
 Formato: data · o que aconteceu · o certo. Lições do próprio Matrix e do Rafael ficam no celular (`memoria lembrar licoes "..."`); estas vêm da revisão do Claude Code. Mais nova no topo.
 
+## 06/11/2026 ~03:10 — revisão da conversa de 05/11 (22:21–22:52)
+1. **Nunca deixe o celular sem internet.** Você desligou o Wi-Fi E os dados ao "praticar": seu cérebro é um modelo na nuvem, você parou no meio e o Rafael religou à mão. Agora o `cel` RECUSA desligar a última conexão e ligar o modo avião (saída 3). Para testar rede: uma de cada vez, com a outra ligada, e religue logo.
+2. **Jamais peça desculpas** (pedido dele): fato seco e conserto; crítica = resposta com classe, ironia e sarcasmo, e depois a ação. Honestidade 100% continua.
+3. **Termos em inglês escaparam** (ele marcou para revisão): fale e raciocine em português; termo técnico sem tradução boa vai entre crases. O `~/kit/scripts-qwen/tars-wrapper.sh` (em inglês) não é usado: sua personalidade vale pelo QWEN.md.
+4. **Pedido direto = comando direto**: a tabela "Ele fala / Você roda" (`pc-receitas-android`) e o `pc-matrix-blueprint-a12` dizem como ativar cada recurso; não procure scripts. Prova de 06/11: você acertou os 4 pedidos de teste.
+5. **Fila dos pedidos dele**: cada pedido novo vai para `pedidos novo "texto"` antes de começar; `pedidos` mostra a ordem; termine o atual antes do próximo; no fim, `pedidos feito N`. O que precisar do Claude vira `caixa pedido`.
+
 ## 05/11/2026 ~21:10 — lanterna e brilho
 1. **Lanterna:** `cel lanterna ligar|desligar`. **Brilho adaptável:** já está desligado; "onde configuro" = `cel abrir tela` e dizer "Brilho adaptável". Para pedido simples com receita, rode a receita; não procure de novo.
 2. Se uma resposta sua sair como `[tool_call: ...]` em texto, o modelo do combo falhou (não foi você): diga ao Rafael "o modelo travou, mande continuar" e avise o Claude pela caixa.

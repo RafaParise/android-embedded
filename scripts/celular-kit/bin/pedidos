@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""pedidos: a fila dos pedidos do Rafael ao Matrix (pedido dele, 05/11: "cada requisicao organizada, sem atrapalhar o que
+esta fazendo, na melhor ordem, e revisar para nao faltar nada"). Mora junto da memoria do Matrix (cartao SD ou reserva).
+
+  pedidos                         abertos, na ordem de fazer (urgentes primeiro, depois os mais antigos)
+  pedidos novo "texto" [--urgente]  registra ANTES de comecar (recusa senha, chave, e-mail, CPF e dado de aluno)
+  pedidos fazendo N               marca o que esta em andamento (so um por vez)
+  pedidos feito N ["nota"]        fecha
+  pedidos largar N "motivo"       desiste com motivo (ex.: "precisa do Claude: caixa pedido enviado")
+  pedidos todos                   os ultimos 30, com os fechados
+  pedidos revisar                 o que esta aberto ha mais de 1 dia e o que esta "fazendo" (para nao esquecer nada)
+Saida: 0 ok, 1 nada a fazer/nao achou, 2 uso errado, 3 recusado.
+"""
+import json
+import os
+import pathlib
+import re
+import sys
+import time
+
+PROIBIDO = [
+    (re.compile(r"(?i)\b(senha|password|passwd|pin|token|api[_-]?key|secret|bearer)\b\s*[:=]?\s*\S{6,}"), "senha, chave ou token"),
+    (re.compile(r"\b(sk-|sk-or-|nvapi-|gsk_|hf_|ghp_|github_pat_|tskey-|AIza|AQ\.)[A-Za-z0-9_\-.]{12,}"), "chave de provedor"),
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "e-mail"),
+    (re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"), "CPF"),
+    (re.compile(r"(?i)\bmapao\b|\bmapão\b|\bboletim\b|\bnotas? d[oa]s? alun|\bRA\s*[:=]?\s*\d{6,}"), "dado de aluno"),
+]
+
+
+def base():
+    """PEDIDOS_DIR (testes) > a pasta da memoria no cartao (se ligada) > ~/kit/memoria."""
+    if os.environ.get("PEDIDOS_DIR"):
+        return pathlib.Path(os.environ["PEDIDOS_DIR"])
+    try:
+        alvo = pathlib.Path((pathlib.Path.home() / "kit" / "memoria-no-cartao").read_text(encoding="utf-8").strip())
+        if alvo.is_dir() and os.access(alvo, os.W_OK):
+            return alvo
+    except OSError:
+        pass
+    return pathlib.Path.home() / "kit" / "memoria"
+
+
+ARQ = base() / "pedidos.json"
+
+
+def le():
+    try:
+        return json.loads(ARQ.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+def grava(lista):
+    ARQ.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ARQ.with_suffix(".tmp")
+    tmp.write_text(json.dumps(lista, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, ARQ)
+
+
+def agora():
+    return time.strftime("%Y-%m-%d %H:%M")
+
+
+def ordem(lista):
+    abertos = [p for p in lista if p["estado"] in ("aberto", "fazendo")]
+    return sorted(abertos, key=lambda p: (p["estado"] != "fazendo", not p.get("urgente"), p["hora"], p["id"]))
+
+
+def linha(p):
+    marca = {"fazendo": "[FAZENDO] ", "feito": "[feito] ", "largado": "[largado] "}.get(p["estado"], "")
+    extra = (" (urgente)" if p.get("urgente") and p["estado"] == "aberto" else "") + (f" -> {p['nota']}" if p.get("nota") else "")
+    return f"{p['id']:>3}. {p['hora']}  {marca}{p['texto']}{extra}"
+
+
+def acha(lista, n):
+    if not re.fullmatch(r"\d{1,5}", n or ""):
+        return None
+    return next((p for p in lista if p["id"] == int(n)), None)
+
+
+def main(argv=None):
+    a = list(sys.argv[1:] if argv is None else argv)
+    lista = le()
+    cmd = a[0] if a else "lista"
+    if cmd in ("lista", "abertos"):
+        abertos = ordem(lista)
+        if not abertos:
+            print("Nenhum pedido aberto.")
+            return 1
+        print("\n".join(linha(p) for p in abertos))
+        return 0
+    if cmd == "novo":
+        urg = "--urgente" in a
+        texto = " ".join(x for x in a[1:] if x != "--urgente").strip()
+        if not texto or len(texto) > 1000:
+            print('Use: pedidos novo "texto" [--urgente]')
+            return 2
+        for re_, motivo in PROIBIDO:
+            if re_.search(texto):
+                print(f"Recusado: o texto tem {motivo}. Registre sem isso.")
+                return 3
+        n = max((p["id"] for p in lista), default=0) + 1
+        lista.append({"id": n, "hora": agora(), "texto": texto, "estado": "aberto", "urgente": urg})
+        grava(lista)
+        print(f"Pedido {n} registrado{' (urgente)' if urg else ''}. Na fila: {len(ordem(lista))}.")
+        return 0
+    if cmd in ("fazendo", "feito", "largar"):
+        p = acha(lista, a[1] if len(a) > 1 else "")
+        if not p:
+            print(f"Use: pedidos {cmd} N  (veja os numeros com: pedidos)")
+            return 2
+        nota = " ".join(a[2:]).strip()
+        if cmd == "largar" and not nota:
+            print('Diga o motivo: pedidos largar N "motivo"')
+            return 2
+        if nota and any(r.search(nota) for r, _ in PROIBIDO):
+            print("Recusado: a nota tem dado que nao entra na memoria.")
+            return 3
+        if cmd == "fazendo":
+            for q in lista:
+                if q["estado"] == "fazendo" and q is not p:
+                    q["estado"] = "aberto"  # um por vez: o anterior volta para a fila
+        p["estado"] = {"fazendo": "fazendo", "feito": "feito", "largar": "largado"}[cmd]
+        if nota:
+            p["nota"] = nota
+        p["mudou"] = agora()
+        grava(lista)
+        print(linha(p))
+        return 0
+    if cmd == "todos":
+        for p in lista[-30:]:
+            print(linha(p))
+        return 0 if lista else 1
+    if cmd == "revisar":
+        limite = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() - 86400))
+        velhos = [p for p in ordem(lista) if p["hora"] < limite or p["estado"] == "fazendo"]
+        if not velhos:
+            print("Nada esquecido: nenhum pedido aberto ha mais de 1 dia nem em andamento.")
+            return 1
+        print("Para nao esquecer:")
+        print("\n".join(linha(p) for p in velhos))
+        return 0
+    print(__doc__.split("\n\n")[1])
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

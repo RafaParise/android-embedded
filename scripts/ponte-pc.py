@@ -60,7 +60,7 @@ MAX_PAREAMENTOS_PENDENTES = 5
 URL_PUBLICA_PADRAO = "http://100.64.0.1:20130"     # o PC na Tailscale (IP fixo do aparelho); --url-publica troca
 URL_PUBLICA_OK = re.compile(r"http://[A-Za-z0-9.\-]{1,100}:\d{2,5}")
 TOKEN_OK = re.compile(r"[A-Za-z0-9_\-]{32,128}")
-ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
+ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "pedidos": "bin/pedidos", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
 MAX_ACOES_POR_MINUTO = 6
 MAX_ACAO_S = 300
 MAX_SAIDA_ACAO = 6000
@@ -418,24 +418,27 @@ ponte_instalar() {
   cat > "$B/.controle-tv.novo" <<'@@FIM_CTV@@' || cat_falhou=1
 @@CTV@@
 @@FIM_CTV@@
+  cat > "$B/.pedidos.novo" <<'@@FIM_PED@@' || cat_falhou=1
+@@PED@@
+@@FIM_PED@@
   cat > "$T/.iniciar-a12.novo" <<'@@FIM_BOOT@@' || cat_falhou=1
 @@BOOT@@
 @@FIM_BOOT@@
   cat > "$Q/.QWEN.md.novo" <<'@@FIM_QWEN@@' || cat_falhou=1
 @@QWEN_MD@@
 @@FIM_QWEN@@
-  if [ "$cat_falhou" != 0 ] || [ ! -s "$B/.ia.novo" ] || [ ! -s "$B/.caixa.novo" ] || [ ! -s "$B/.saida.novo" ] || [ ! -s "$B/.guarda.novo" ] || [ ! -s "$B/.cel.novo" ] || [ ! -s "$B/.memoria.novo" ] || [ ! -s "$B/.link.novo" ] || [ ! -s "$B/.controle-tv.novo" ] || [ ! -s "$T/.iniciar-a12.novo" ] || [ ! -s "$Q/.QWEN.md.novo" ]; then
+  if [ "$cat_falhou" != 0 ] || [ ! -s "$B/.ia.novo" ] || [ ! -s "$B/.caixa.novo" ] || [ ! -s "$B/.saida.novo" ] || [ ! -s "$B/.guarda.novo" ] || [ ! -s "$B/.cel.novo" ] || [ ! -s "$B/.memoria.novo" ] || [ ! -s "$B/.link.novo" ] || [ ! -s "$B/.controle-tv.novo" ] || [ ! -s "$B/.pedidos.novo" ] || [ ! -s "$T/.iniciar-a12.novo" ] || [ ! -s "$Q/.QWEN.md.novo" ]; then
     echo "Nao consegui gravar os arquivos novos (armazenamento cheio?). Nada foi trocado; libere espaco e rode de novo."
-    rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
+    rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
   fi
   for f in "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.link.novo" "$T/.iniciar-a12.novo"; do
-    "$BASH" -n "$f" 2>/dev/null || { echo "O arquivo '$f' chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1; }
+    "$BASH" -n "$f" 2>/dev/null || { echo "O arquivo '$f' chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1; }
   done
-  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read()); ast.parse(open(sys.argv[2], encoding="utf-8").read())' "$B/.memoria.novo" "$B/.controle-tv.novo" 2>/dev/null; then
-    echo "O arquivo memoria ou controle-tv chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
+  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read()); ast.parse(open(sys.argv[2], encoding="utf-8").read()); ast.parse(open(sys.argv[3], encoding="utf-8").read())' "$B/.memoria.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" 2>/dev/null; then
+    echo "O arquivo memoria ou controle-tv chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
   fi
 @@BLOCO_TOKEN@@
-  for f in ia caixa saida guarda cel memoria link controle-tv; do
+  for f in ia caixa saida guarda cel memoria link controle-tv pedidos; do
     [ -e "$A/$f" ] || { [ -e "$B/$f" ] && cp -p "$B/$f" "$A/$f"; }
     chmod 755 "$B/.$f.novo" && mv -f "$B/.$f.novo" "$B/$f" && echo "  [ok]  comando $f instalado em ~/bin" || { echo "  [--]  nao consegui instalar o comando $f"; rm -f "$B/.$f.novo"; erro=1; }
   done
@@ -802,7 +805,7 @@ class Ponte:
         textos = self._arquivos_kit_celular()
         versao = self.kit_versao()
         delimitadores = {}
-        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
+        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("pedidos", "PED"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
             texto = _MESCLA_PY.rstrip("\n") if chave == "mescla" else textos[chave]
             delim = f"PONTE_FIM_{nome}_{hashlib.sha256(texto.encode('utf-8')).hexdigest()[:8].upper()}"
             if delim in texto.split("\n"):
@@ -811,7 +814,7 @@ class Ponte:
         bloco_env = _BLOCO_TOKEN_NOVO.replace("@@TOKEN@@", token) if token is not None else _BLOCO_TOKEN_JA_TEM  # (nome sem "token = " colado: o varredor de segredos do sync pega)
         valores = {
             "VERSAO": versao, "URL": url, "BLOCO_TOKEN": bloco_env,
-            "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "LINK": textos["link"], "FIM_LINK": delimitadores["LINK"], "CTV": textos["controle_tv"], "FIM_CTV": delimitadores["CTV"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
+            "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "LINK": textos["link"], "FIM_LINK": delimitadores["LINK"], "CTV": textos["controle_tv"], "FIM_CTV": delimitadores["CTV"], "PED": textos["pedidos"], "FIM_PED": delimitadores["PED"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
             "FIM_IA": delimitadores["IA"], "FIM_CAIXA": delimitadores["CAIXA"], "FIM_SAIDA": delimitadores["SAIDA"], "FIM_BOOT": delimitadores["BOOT"], "FIM_QWEN": delimitadores["QWEN"], "FIM_PY": delimitadores["PY"],
         }
         return re.sub(r"@@([A-Z_]+)@@", lambda m: valores[m.group(1)], _MODELO_INSTALADOR)

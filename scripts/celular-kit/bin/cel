@@ -290,10 +290,22 @@ abre() { # sem conexao tambem funciona: o Termux pode abrir telas sozinho
   am start -a "$1" >/dev/null 2>&1
 }
 
+sem_internet_recusa() { # 06/11: o Matrix desligou Wi-Fi E dados, perdeu o proprio cerebro (modelo na nuvem) e nao religou
+  echo "Recusado: assim o celular fica SEM internet e eu (a IA) penso pela internet: pararia no meio e nao conseguiria religar."
+  echo "Se e isso mesmo, o Rafael faz pelo painel rapido (deslizar de cima para baixo). Para trocar de rede, desligue uma de cada vez com a outra ligada."
+  exit 3
+}
+outra_ligada() { # $1 = servico que vai desligar (wifi|data): a outra conexao precisa estar ligada
+  case "$1" in
+    wifi) [ "$(sh_ 'settings get global mobile_data' | tr -d '\r')" = 1 ] ;;
+    data) case "$(sh_ 'settings get global wifi_on' | tr -d '\r')" in 1|2) true ;; *) false ;; esac ;;
+    *) true ;;
+  esac
+}
 liga_desliga() { # $1 = servico do svc, $2 = ligar|desligar, $3 = nome para o Rafael
   case "$2" in
     ligar) precisa; sh_ "svc $1 enable" && echo "$3 ligado." ;;
-    desligar) precisa; solto "svc $1 disable"; echo "$3 desligado." ;;
+    desligar) precisa; outra_ligada "$1" || sem_internet_recusa; solto "svc $1 disable"; echo "$3 desligado." ;;
     *) echo "Use: cel ${4:-$1} ligar|desligar"; exit 2 ;;
   esac
 }
@@ -384,7 +396,7 @@ case "${1:-status}" in
     esac ;;
   aviao)
     case "${2:-}" in
-      ligar) precisa; solto "cmd connectivity airplane-mode enable"; echo "Modo aviao ligado (a conexao com o sistema cai junto)." ;;
+      ligar) sem_internet_recusa ;;
       desligar) precisa; sh_ "cmd connectivity airplane-mode disable"; echo "Modo aviao desligado." ;;
       *) echo "Use: cel aviao ligar|desligar"; exit 2 ;;
     esac ;;

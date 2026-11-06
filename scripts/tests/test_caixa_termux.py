@@ -31,7 +31,7 @@ def cel(tmp_path, importa_script):
     kit = proj / "scripts" / "celular-kit"  # o PC serve ao celular o kit REAL do repositorio
     (kit / "bin").mkdir(parents=True)
     (kit / "boot").mkdir()
-    for rel in ("bin/ia", "bin/caixa", "bin/saida", "bin/guarda", "bin/cel", "bin/memoria", "bin/link", "bin/controle-tv", "boot/iniciar-a12", "QWEN.md"):
+    for rel in ("bin/ia", "bin/caixa", "bin/saida", "bin/guarda", "bin/cel", "bin/memoria", "bin/link", "bin/controle-tv", "bin/pedidos", "boot/iniciar-a12", "QWEN.md"):
         (kit / rel).write_bytes((RAIZ / "scripts" / "celular-kit" / rel).read_bytes())
     ponte = m.Ponte(proj, base)
     (base / "entrada" / "pedido-01.md").write_text("Faca o resumo.\nacento: ação\n", encoding="utf-8")

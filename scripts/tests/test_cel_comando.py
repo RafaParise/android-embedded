@@ -19,6 +19,8 @@ case "$1" in
       case "$*" in
         *"pm list packages"*) printf 'package:com.exemplo.um\npackage:com.samsung.android.smartmirroring\n' ;;
         *"settings list"*) echo "bluetooth_on=1" ;;
+        *"settings get global mobile_data"*) [ -f "$FALSO_DIR/sem_dados" ] && echo 0 || echo 1 ;;
+        *"settings get global wifi_on"*) [ -f "$FALSO_DIR/sem_wifi" ] && echo 0 || echo 1 ;;
         *"df /data"*) echo "/dev/x 100 50 1000 5% /data" ;;
         *"pgrep -f"*) exit 0 ;;
         *"uiautomator dump"*) cat "$FALSO_DIR/tela.xml" 2>/dev/null ;;
@@ -400,3 +402,19 @@ def test_enviar_pc_recusa_fora_do_armazenamento_e_nome_perigoso(cel):
     rc, s = cel.roda("enviar-pc", "/data/data/com.termux/files/home/segredo.txt", "/sdcard/a;rm.jpg")
     assert "So arquivo do armazenamento" in s and "caractere perigoso" in s
     assert "ShareActivity" not in cel.registro()
+
+
+def test_nunca_deixa_o_celular_sem_internet(cel):
+    """06/11: o Matrix desligou Wi-Fi e dados, perdeu o modelo da nuvem e nao conseguiu religar."""
+    _conectado(cel)
+    (cel.dir / "sem_dados").write_text("")
+    rc, s = cel.roda("wifi", "desligar")
+    assert rc == 3 and "SEM internet" in s and "svc wifi disable" not in cel.registro()
+    (cel.dir / "sem_dados").unlink()
+    (cel.dir / "sem_wifi").write_text("")
+    rc, s = cel.roda("dados", "desligar")
+    assert rc == 3 and "svc data disable" not in cel.registro()
+    rc, s = cel.roda("aviao", "ligar")
+    assert rc == 3 and "airplane-mode enable" not in cel.registro()
+    (cel.dir / "sem_wifi").unlink()
+    assert cel.roda("dados", "desligar")[0] == 0 and "svc data disable" in cel.registro()

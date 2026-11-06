@@ -53,6 +53,7 @@ def mundo(tmp_path, importa_script):
     _escreve(kit / "bin" / "memoria", "#!/usr/bin/env python3\nprint('memoria falso')\n")
     _escreve(kit / "bin" / "link", SAIDA_FALSO.replace("saida falso", "link falso"))
     _escreve(kit / "bin" / "controle-tv", "#!/usr/bin/env python3" + chr(10) + "print(1)" + chr(10))
+    _escreve(kit / "bin" / "pedidos", "#!/usr/bin/env python3" + chr(10) + "print(2)" + chr(10))
     _escreve(kit / "boot" / "iniciar-a12", BOOT_FALSO)
     _escreve(kit / "QWEN.md", QWEN_MD_FALSO)
     _escreve(proj / "CLAUDE.md", "# p\n")
@@ -175,7 +176,7 @@ def test_instalador_passa_no_bash_n_e_a_versao_confere(mundo):
 
 def test_versao_muda_quando_qualquer_arquivo_do_kit_muda(mundo):
     v0 = mundo.ponte.kit_versao()
-    for rel in ("bin/ia", "bin/caixa", "bin/saida", "bin/guarda", "bin/cel", "bin/memoria", "bin/link", "bin/controle-tv", "boot/iniciar-a12", "QWEN.md"):
+    for rel in ("bin/ia", "bin/caixa", "bin/saida", "bin/guarda", "bin/cel", "bin/memoria", "bin/link", "bin/controle-tv", "bin/pedidos", "boot/iniciar-a12", "QWEN.md"):
         arq = mundo.kit / rel
         antigo = arq.read_bytes()
         arq.write_bytes(antigo + b"# mudou\n")
@@ -536,7 +537,7 @@ def test_a_instalacao_real_do_repositorio_funciona_de_ponta_a_ponta(tmp_path, im
         rc, saida = celular.roda(ponte.instalador(TOKEN, URL), como="pipe")
         assert rc == 0, saida
         kit = RAIZ / "scripts" / "celular-kit"
-        for rel, destino in (("bin/ia", "bin/ia"), ("bin/caixa", "bin/caixa"), ("bin/saida", "bin/saida"), ("bin/guarda", "bin/guarda"), ("bin/cel", "bin/cel"), ("bin/memoria", "bin/memoria"), ("bin/link", "bin/link"), ("bin/controle-tv", "bin/controle-tv"), ("boot/iniciar-a12", ".termux/boot/iniciar-a12"), ("QWEN.md", ".qwen/QWEN.md")):
+        for rel, destino in (("bin/ia", "bin/ia"), ("bin/caixa", "bin/caixa"), ("bin/saida", "bin/saida"), ("bin/guarda", "bin/guarda"), ("bin/cel", "bin/cel"), ("bin/memoria", "bin/memoria"), ("bin/link", "bin/link"), ("bin/controle-tv", "bin/controle-tv"), ("bin/pedidos", "bin/pedidos"), ("boot/iniciar-a12", ".termux/boot/iniciar-a12"), ("QWEN.md", ".qwen/QWEN.md")):
             esperado = (kit / rel).read_bytes().decode("utf-8").replace("\r\n", "\n").rstrip("\n") + "\n"
             assert ler(celular.home / destino) == esperado, rel
         assert "[ok]  ponte do PC responde" in saida and "Pronto (kit " in saida
