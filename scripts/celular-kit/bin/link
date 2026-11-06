@@ -3,8 +3,10 @@
 # ScreenStream, arquivos ou apps instalados. Pedido do Rafael (05/11/2026): aluno com dados moveis, TV da escola com
 # navegador, notebook no Wi-Fi da SEDUC, celular de qualquer modelo.
 #   link tela [--minutos N] [--local]          a tela do ScreenStream (inicie a transmissao no app antes)
+#   link tela --som [--minutos N] [--local]    a tela COM SOM (ScreenStream no modo RTSP + ffmpeg do Termux)
 #   link arquivo CAMINHO... [--minutos N] [--local]   um ou mais arquivos (fotos, PDF, video, APK...)
 #   link app PACOTE [--minutos N] [--local]    o APK de um app instalado (ex.: org.localsend.localsend_app)
+#   link internet [--minutos N]                internet SEM o filtro da escola para o notebook do seu hotspot (proxy)
 #   link status                                o que esta compartilhado e os enderecos
 #   link parar                                 para tudo (o link publico deixa de existir)
 # Como chega: (1) LOCAL = quem esta no seu hotspot ou na mesma rede abre o endereco http://... (nao gasta internet);
@@ -13,7 +15,7 @@
 # aparelho que estiver vendo). --local = so o (1). Para sozinho depois de --minutos (padrao 120).
 # Seguranca: o link de arquivos tem uma chave aleatoria e so entrega os arquivos escolhidos; recusa segredos (.env, .ssh,
 # chaves, Backups, MAPAO). A TELA nao tem chave: ligue o PIN no ScreenStream (Configuracoes de seguranca) antes de
-# mandar o link publico. Variaveis: LINK_RUN, LINK_PORTA (8770), LINK_SS_PORTA (8080), LINK_IPS (testes).
+# mandar o link publico. Variaveis: LINK_RUN, LINK_PORTA (8770), LINK_SS_PORTA (8080), LINK_RTSP_PORTA (8554), LINK_IPS (testes).
 
 RUN="${LINK_RUN:-$HOME/.cache/link}"
 PORTA="${LINK_PORTA:-8770}"
@@ -25,7 +27,7 @@ num() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
 
 # enderecos IPv4 do aparelho (interface ip), menos o lo; o Termux nao le /sys nem /proc/net, o getifaddrs funciona
 enderecos() {
-  if [ -n "${LINK_IPS:-}" ]; then printf '%s\n' $LINK_IPS | sed 's/^/teste /'; return; fi
+  if [ -n "${LINK_IPS:-}" ]; then printf '%s\n' $LINK_IPS | awk -F= 'NF==2{print $1, $2; next}{print "teste", $0}'; return; fi
   python3 - <<'PY' 2>/dev/null
 import ctypes, socket
 class SA(ctypes.Structure):
@@ -66,12 +68,13 @@ pid_de() {  # pid gravado em $RUN/$1.pid, se o processo ainda for o nosso (o num
 
 cmd_parar() {
   local n p
-  for n in tunel servidor proxy relogio; do
-    case "$n" in tunel) m=cloudflared ;; servidor) m=link-servidor ;; proxy) m=link-proxy ;; relogio) m=sleep ;; esac
+  for n in tunel servidor proxy hls ffmpeg internet relogio; do
+    case "$n" in tunel) m=cloudflared ;; servidor) m=link-servidor ;; proxy) m=link-proxy ;; hls) m=link-hls ;; internet) m=link-internet ;; ffmpeg) m=ffmpeg ;; relogio) m=sleep ;; esac
     if p=$(pid_de "$n" "$m"); then kill "$p" 2>/dev/null; fi
     rm -f "$RUN/$n.pid"
   done
   rm -f "$RUN/publico" "$RUN/local" "$RUN/o-que" "$RUN/arquivos.json"
+  [ -d "$RUN/hls" ] && find "$RUN/hls" -mindepth 1 -delete 2>/dev/null
   echo "Compartilhamento parado: os links deixaram de funcionar."
 }
 
@@ -103,11 +106,12 @@ mostra() {  # $1 = endereco principal (vai para o QR e para a area de transferen
 }
 
 opcoes() {  # le --minutos N e --local; o resto fica em RESTO
-  MIN=120; LOCAL_SO=0; RESTO=()
+  MIN=120; LOCAL_SO=0; SOM=0; RESTO=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --minutos) MIN=$(num "$2" 120); shift 2 ;;
       --local) LOCAL_SO=1; shift ;;
+      --som) SOM=1; shift ;;
       *) RESTO+=("$1"); shift ;;
     esac
   done
@@ -331,6 +335,7 @@ cmd_app() {
 
 cmd_tela() {
   opcoes "$@"
+  if [ "$SOM" = 1 ]; then cmd_tela_som; return; fi
   local alvo="" ifc ip u principal=""
   # o ScreenStream so escuta nos enderecos que ele lista (filtro de interface/endereco do app): acha um que responda
   for ip in 127.0.0.1 $(enderecos | awk '{print $2}'); do
@@ -370,24 +375,330 @@ cmd_tela() {
   mostra "${principal:-$(head -1 "$RUN/local" 2>/dev/null)}"
 }
 
+# ---- tela COM SOM (06/11): o modo MJPEG do ScreenStream nao tem audio. O modo RTSP (o mesmo app do F-Droid, codigo
+# aberto) tem; o navegador nao abre RTSP, entao o ffmpeg do Termux reempacota (video copiado, sem recodificar; so o som
+# vira AAC) em HLS, que qualquer navegador toca (hls.js, Apache-2.0, guardado no celular; Safari e TVs tocam HLS direto).
+# Atraso: alguns segundos (o HLS trabalha em pedacos de ~1 s). Padrao do ScreenStream: porta 8554, caminho "screen".
+RTSP_PORTA="${LINK_RTSP_PORTA:-8554}"
+RTSP_CAMINHO="${LINK_RTSP_CAMINHO:-screen}"
+HLSJS_VER="1.5.20"
+HLSJS_SHA="d016c1230496ee59f3f5b01c16cce4cc01b5a1d3d357adec200c908b131ebe49"
+HLSJS_URL="${LINK_HLSJS_URL:-https://cdn.jsdelivr.net/npm/hls.js@$HLSJS_VER/dist/hls.min.js}"
+HLSJS_ARQ="${LINK_HLSJS_ARQ:-$HOME/kit/hls/hls-$HLSJS_VER.min.js}"
+
+porta_aberta() {  # $1 ip, $2 porta
+  python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(1.5); sys.exit(0 if s.connect_ex((sys.argv[1], int(sys.argv[2]))) == 0 else 1)' "$1" "$2" 2>/dev/null
+}
+
+hlsjs() {  # garante o hls.js conferido pelo sha256; sem ele a pagina tenta o HLS nativo do navegador
+  local tmp
+  if [ -s "$HLSJS_ARQ" ] && [ "$(sha256sum "$HLSJS_ARQ" | cut -d' ' -f1)" = "$HLSJS_SHA" ]; then return 0; fi
+  mkdir -p "$(dirname "$HLSJS_ARQ")"; tmp="$HLSJS_ARQ.baixando"
+  if curl -sfL -m 30 -o "$tmp" "$HLSJS_URL" && [ "$(sha256sum "$tmp" | cut -d' ' -f1)" = "$HLSJS_SHA" ]; then
+    mv -f "$tmp" "$HLSJS_ARQ"; return 0
+  fi
+  rm -f "$tmp"; return 1
+}
+
+hls_pagina() {  # $1 = pasta da chave
+  cat > "$1/index.html" <<'HTML'
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tela do celular</title>
+<style>html,body{margin:0;height:100%;background:#000;color:#eee;font:18px sans-serif}video{width:100%;height:100%;object-fit:contain;display:block}
+#som{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);padding:14px 22px;font-size:20px;border:0;border-radius:10px;background:#1a7f37;color:#fff}
+#aviso{position:fixed;top:12px;left:12px;right:12px;text-align:center;color:#ccc}</style>
+<video id="v" autoplay muted playsinline controls></video><button id="som">Toque para ouvir o som</button><div id="aviso">Carregando a tela...</div>
+<script src="hls.min.js"></script>
+<script>
+var v = document.getElementById("v"), b = document.getElementById("som"), a = document.getElementById("aviso"), fonte = "tela.m3u8";
+function ok() { a.textContent = ""; }
+function erro(t) { a.textContent = t; setTimeout(function () { location.reload(); }, 4000); }
+if (window.Hls && Hls.isSupported()) {
+  var h = new Hls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 5, maxLiveSyncPlaybackRate: 1.5 });
+  h.loadSource(fonte); h.attachMedia(v);
+  h.on(Hls.Events.MANIFEST_PARSED, function () { v.play().catch(function () {}); ok(); });
+  h.on(Hls.Events.ERROR, function (e, d) { if (d.fatal) erro("A transmissao caiu; tentando de novo..."); });
+} else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+  v.src = fonte; v.addEventListener("loadedmetadata", function () { v.play().catch(function () {}); ok(); });
+  v.addEventListener("error", function () { erro("A transmissao caiu; tentando de novo..."); });
+} else { a.textContent = "Este navegador nao toca a transmissao (sem HLS). Tente o Chrome, o Firefox ou o navegador da TV."; }
+b.onclick = function () { v.muted = false; v.volume = 1; v.play(); b.style.display = "none"; };
+</script></html>
+HTML
+}
+
+hls_servidor_sobe() {  # serve SO a pasta $RUN/hls/CHAVE (nomes simples), sem lista de arquivos; $1 = bind
+  cat > "$RUN/link-hls.py" <<'PY'
+import http.server, os, re, socketserver, sys, urllib.parse
+porta, chave, raiz, bind = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+TIPOS = {".m3u8": "application/vnd.apple.mpegurl", ".ts": "video/mp2t", ".js": "application/javascript", ".html": "text/html; charset=utf-8"}
+NOME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,60}")
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+    def do_GET(self):
+        cru = urllib.parse.urlparse(self.path).path
+        partes = cru.strip("/").split("/")
+        if cru == "/" + chave:
+            self.send_response(301); self.send_header("Location", "/%s/" % chave); self.end_headers(); return
+        if len(partes) not in (1, 2) or partes[0] != chave:
+            self.send_error(404); return
+        nome = partes[1] if len(partes) == 2 and partes[1] else "index.html"
+        tipo = TIPOS.get(os.path.splitext(nome)[1])
+        if not NOME.fullmatch(nome) or ".." in nome or tipo is None:
+            self.send_error(404); return
+        try:
+            with open(os.path.join(raiz, chave, nome), "rb") as f:
+                corpo = f.read()
+        except OSError:
+            self.send_error(404); return
+        self.send_response(200)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Content-Length", str(len(corpo)))
+        self.send_header("Cache-Control", "no-cache" if nome.endswith((".m3u8", ".html")) else "max-age=60")
+        self.end_headers()
+        self.wfile.write(corpo)
+class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+S((bind, porta), H).serve_forever()
+PY
+  nohup python3 "$RUN/link-hls.py" "$PORTA" "$CHAVE" "$RUN/hls" "$1" >/dev/null 2>&1 </dev/null &
+  echo $! > "$RUN/hls.pid"
+  local i
+  for i in $(seq 1 30); do
+    curl -s -o /dev/null -m 2 "http://127.0.0.1:$PORTA/$CHAVE/" && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+cmd_tela_som() {
+  local ip origem="" pasta i lan u principal="" ifc
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "Falta o ffmpeg (codigo aberto, do proprio Termux): pkg install ffmpeg   e depois de novo: link tela --som"
+    return 1
+  fi
+  for ip in 127.0.0.1 $(enderecos | awk '{print $2}'); do
+    if porta_aberta "$ip" "$RTSP_PORTA"; then origem="rtsp://$ip:$RTSP_PORTA/$RTSP_CAMINHO"; break; fi
+  done
+  if [ -z "$origem" ]; then
+    echo "O ScreenStream nao esta no modo RTSP. No app: Modo de transmissao = RTSP (Servidor); em Audio, ligue"
+    echo "'Audio do dispositivo'; Video = H.264; toque em Iniciar. Depois: link tela --som"
+    echo "(Sem som, o jeito de sempre segue valendo: link tela)"
+    return 1
+  fi
+  cmd_parar >/dev/null
+  CHAVE=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  pasta="$RUN/hls/$CHAVE"; mkdir -p "$pasta"; chmod 700 "$RUN/hls"
+  hls_pagina "$pasta"
+  if hlsjs; then cp -f "$HLSJS_ARQ" "$pasta/hls.min.js"
+  else echo "  (Sem o hls.js: so tocam os navegadores com HLS proprio, como Safari e o de algumas TVs. Com internet, rode de novo.)"; fi
+  nohup ffmpeg -nostdin -hide_banner -loglevel info -nostats -rtsp_transport tcp -i "$origem" \
+    -map 0:v:0 -map '0:a:0?' -c:v copy -c:a aac -b:a 128k -ac 2 \
+    -f hls -hls_time 1 -hls_list_size 6 -hls_flags delete_segments+independent_segments+omit_endlist \
+    -hls_segment_filename "$pasta/s%05d.ts" "$pasta/tela.m3u8" >"$RUN/ffmpeg.log" 2>&1 </dev/null &
+  echo $! > "$RUN/ffmpeg.pid"
+  for i in $(seq 1 50); do
+    [ -s "$pasta/tela.m3u8" ] && break
+    pid_de ffmpeg ffmpeg >/dev/null || break
+    sleep 0.4
+  done
+  if [ ! -s "$pasta/tela.m3u8" ]; then
+    echo "O ffmpeg nao conseguiu ler a tela do ScreenStream ($origem). Ultimas linhas:"
+    tail -n 4 "$RUN/ffmpeg.log" | cut -c1-160 | sed 's/^/  /'
+    cmd_parar >/dev/null; return 1
+  fi
+  if grep -qi 'Video: hevc' "$RUN/ffmpeg.log"; then
+    echo "  ATENCAO: o video esta em H.265, que quase nenhum navegador toca. No ScreenStream: Video = H.264, e rode de novo."
+  fi
+  if ! grep -q 'Audio:' "$RUN/ffmpeg.log"; then
+    echo "  ATENCAO: a transmissao veio SEM som. No ScreenStream (RTSP), em Audio, ligue 'Audio do dispositivo'."
+  fi
+  hls_servidor_sobe 0.0.0.0 || { echo "O servidor da tela nao subiu (porta $PORTA ocupada?)."; cmd_parar >/dev/null; return 1; }
+  echo "tela com som" > "$RUN/o-que"
+  : > "$RUN/local"
+  echo "Tela do celular COM SOM (atraso de alguns segundos). Para quem esta perto (sem gastar internet):"
+  while read -r ifc ip; do
+    [ -n "$ip" ] || continue
+    lan="http://$ip:$PORTA/$CHAVE/"
+    echo "  $lan   <- $(rotulo "$ifc")"
+    echo "$lan" >> "$RUN/local"
+    case "$ifc" in swlan*|softap*|ap0*) principal=${principal:-$lan} ;; esac
+  done < <(enderecos)
+  if [ "$LOCAL_SO" = 0 ]; then
+    echo "Criando o link publico (ate 40 s)..."
+    if u=$(tunel "127.0.0.1:$PORTA"); then
+      echo "Para qualquer lugar (ate nos dados moveis do aluno):"
+      echo "  $u/$CHAVE/"
+      principal="$u/$CHAVE/"
+      echo "  Cada aparelho vendo gasta a sua internet (video + som)."
+    else
+      echo "  O link publico nao saiu (sem internet ou a Cloudflare recusou: link status). O local funciona."
+    fi
+  fi
+  echo "  Na TV ou no notebook: abra o link e toque em 'Toque para ouvir o som' (o navegador nao deixa tocar som sozinho)."
+  relogio "$MIN"
+  echo "Para sozinho em $MIN min (ou: link parar)."
+  mostra "${principal:-$(head -1 "$RUN/local")}"
+}
+
+# ---- internet SEM FILTRO para o notebook do hotspot (06/11): o Android manda o hotspot direto pela rede em uso (o Wi-Fi da
+# escola, com filtro), sem passar pela VPN; o que os APPS do celular abrem passa pela VPN (saida pelo PC). Este proxy e um
+# app do celular: o notebook usa o proxy e a navegacao dele sai pelo PC. So escuta no endereco do hotspot, so atende quem
+# esta no hotspot, so abre sites publicos (nunca enderecos internos do celular, da escola ou da Tailscale) e nas portas web.
+PROXY_PORTA="${LINK_PROXY_PORTA:-3128}"
+
+proxy_internet_sobe() {  # $1 = ip do hotspot, $2 = rede permitida
+  cat > "$RUN/link-internet.py" <<'PY'
+import asyncio, ipaddress, os, socket, sys, urllib.parse
+bind, porta, rede = sys.argv[1], int(sys.argv[2]), ipaddress.ip_network(sys.argv[3], strict=False)
+TESTE = os.environ.get("LINK_PROXY_TESTE_LOCAL") == "1"  # so a suite de testes usa: deixa o 127.0.0.1 como destino
+CGNAT = ipaddress.ip_network("100.64.0.0/10")
+P_CONNECT = {443, 8443}
+P_HTTP = {80, 8080}
+
+def proibido(ip):
+    a = ipaddress.ip_address(ip)
+    if TESTE and a.is_loopback:
+        return False
+    return (a.is_private or a.is_loopback or a.is_link_local or a.is_multicast or a.is_reserved or a.is_unspecified
+            or a in CGNAT)
+
+async def destino(host, porta):
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, porta, family=socket.AF_INET, type=socket.SOCK_STREAM)
+    except Exception:
+        return None, 502
+    for *_, end in infos:
+        if not proibido(end[0]):
+            return end[0], 0
+    return None, 403
+
+def resposta(cw, codigo, texto):
+    cw.write(b"HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" % (codigo, texto))
+
+async def pipe(r, w):
+    try:
+        while True:
+            d = await r.read(65536)
+            if not d:
+                break
+            w.write(d)
+            await w.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            w.close()
+        except Exception:
+            pass
+
+async def trata(cr, cw):
+    try:
+        if ipaddress.ip_address(cw.get_extra_info("peername")[0]) not in rede:
+            cw.close(); return
+        cab = await asyncio.wait_for(cr.readuntil(b"\r\n\r\n"), 30)
+    except Exception:
+        cw.close(); return
+    linhas = cab[:-4].split(b"\r\n")
+    partes = linhas[0].split(b" ")
+    if len(partes) != 3:
+        resposta(cw, 400, b"Bad Request"); cw.close(); return
+    metodo, alvo = partes[0], partes[1].decode("latin-1")
+    if metodo == b"CONNECT":
+        host, _, p = alvo.rpartition(":")
+        host = host.strip("[]")
+        if not p.isdigit() or int(p) not in P_CONNECT or not host:
+            resposta(cw, 403, b"Forbidden"); cw.close(); return
+        porta_d, resto = int(p), b""
+    else:
+        u = urllib.parse.urlsplit(alvo)
+        porta_d = u.port or 80
+        if u.scheme != "http" or not u.hostname or porta_d not in P_HTTP:
+            resposta(cw, 403, b"Forbidden"); cw.close(); return
+        host = u.hostname
+        caminho = (u.path or "/") + ("?" + u.query if u.query else "")
+        cabs = [l for l in linhas[1:] if not l.lower().startswith((b"proxy-", b"connection:", b"keep-alive:"))]
+        resto = b"\r\n".join([b"%s %s HTTP/1.1" % (metodo, caminho.encode("latin-1"))] + cabs + [b"Connection: close", b"", b""])
+    ip, erro = await destino(host, porta_d)
+    if not ip:
+        resposta(cw, erro, b"Forbidden" if erro == 403 else b"Bad Gateway"); cw.close(); return
+    try:
+        sr, sw = await asyncio.wait_for(asyncio.open_connection(ip, porta_d), 20)
+    except Exception:
+        resposta(cw, 502, b"Bad Gateway"); cw.close(); return
+    if metodo == b"CONNECT":
+        cw.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        await cw.drain()
+    else:
+        sw.write(resto)
+        await sw.drain()
+    await asyncio.gather(pipe(cr, sw), pipe(sr, cw))
+
+async def main():
+    s = await asyncio.start_server(trata, bind, porta)
+    async with s:
+        await s.serve_forever()
+
+asyncio.run(main())
+PY
+  nohup python3 "$RUN/link-internet.py" "$1" "$PROXY_PORTA" "$2" >/dev/null 2>&1 </dev/null &
+  echo $! > "$RUN/internet.pid"
+  local i
+  for i in $(seq 1 30); do
+    porta_aberta "$1" "$PROXY_PORTA" && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+cmd_internet() {
+  opcoes "$@"
+  local ifc ip hs="" rede
+  while read -r ifc ip; do
+    case "$ifc" in swlan*|softap*|ap0*|teste) [ -n "$ip" ] && { hs=$ip; break; } ;; esac
+  done < <(enderecos)
+  if [ -z "$hs" ]; then
+    echo "O hotspot do celular esta desligado. Ligue o Roteador Wi-Fi (Ancoragem), conecte o notebook nele e rode de novo: link internet"
+    return 1
+  fi
+  rede="${LINK_PROXY_REDE:-${hs%.*}.0/24}"
+  cmd_parar >/dev/null
+  proxy_internet_sobe "$hs" "$rede" || { echo "O proxy nao subiu (porta $PROXY_PORTA ocupada?)."; cmd_parar >/dev/null; return 1; }
+  echo "internet" > "$RUN/o-que"
+  echo "http://$hs:$PROXY_PORTA (proxy)" > "$RUN/local"
+  echo "Internet do celular para o notebook do hotspot, saindo pelo PC (sem o filtro da rede da escola)."
+  echo "No notebook (Windows): Configuracoes > Rede e Internet > Proxy > Configuracao manual do proxy > Configurar:"
+  echo "  Usar um servidor proxy = Ativado | Endereco: $hs | Porta: $PROXY_PORTA | Salvar"
+  echo "  Ao terminar, volte la e DESATIVE (senao o notebook fica sem internet longe do seu hotspot)."
+  echo "So passa o que vai pelo proxy (navegador e apps que usam o proxy do Windows); so sites publicos, nas portas web."
+  echo "Sem filtro so com a saida pelo PC ligada: confira com  saida status"
+  echo "ATENCAO: quem estiver no seu hotspot e configurar o proxy tambem sai sem filtro: hotspot com senha, so o seu notebook."
+  relogio "$MIN"
+  echo "Para sozinho em $MIN min (ou: link parar)."
+}
+
 cmd_status() {
   local o
   o=$(cat "$RUN/o-que" 2>/dev/null)
   if [ -z "$o" ]; then echo "Nada compartilhado agora."; return 0; fi
   echo "Compartilhando: $o"
   if pid_de servidor link-servidor >/dev/null; then echo "  servidor de arquivos: ligado"; fi
+  if pid_de ffmpeg ffmpeg >/dev/null; then echo "  ffmpeg (RTSP -> HLS): ligado"; elif [ "$o" = "tela com som" ]; then echo "  ffmpeg: PAROU (a transmissao do ScreenStream caiu?)"; tail -n 2 "$RUN/ffmpeg.log" 2>/dev/null | cut -c1-160 | sed 's/^/    /'; fi
   if [ -s "$RUN/local" ]; then echo "  local:"; sed 's/^/    /' "$RUN/local"; fi
-  if pid_de tunel cloudflared >/dev/null && [ -s "$RUN/publico" ]; then echo "  publico: $(cat "$RUN/publico")$( [ "$o" = arquivos ] && echo ' (+ /chave/ do link local)')"
+  if pid_de tunel cloudflared >/dev/null && [ -s "$RUN/publico" ]; then echo "  publico: $(cat "$RUN/publico")$( case "$o" in arquivos|"tela com som") echo ' (+ /chave/ do link local)' ;; esac)"
   elif [ -s "$RUN/tunel.log" ]; then echo "  publico: NAO (ultimas linhas do tunel:)"; tail -n 3 "$RUN/tunel.log" | cut -c1-160 | sed 's/^/    /'; fi
   if pid_de relogio sleep >/dev/null; then echo "  para sozinho: sim"; fi
 }
 
-uso() { sed -n '2,20p' "$SELF" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,22p' "$SELF" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-}" in
   tela) shift; cmd_tela "$@" ;;
   arquivo|arquivos) shift; cmd_arquivo "$@" ;;
   app) shift; cmd_app "$@" ;;
+  internet) shift; cmd_internet "$@" ;;
   status) cmd_status ;;
   parar) cmd_parar ;;
   ajuda|-h|--help|"") uso ;;

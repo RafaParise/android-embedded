@@ -16,6 +16,9 @@ Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, 
 | "desliga a câmera do PC", "desliga tudo do OBS" | `cel obs desligar` |
 | "o que está ligado no PC?" | `cel obs status` |
 | "manda minha tela para a TV/aluno", "compartilha esse arquivo/app" | `link tela` / `link arquivo CAMINHO` / `link app PACOTE`; `link parar` |
+| "tela com som", "o som não sai na TV/notebook" | `link tela --som` (ScreenStream no modo RTSP; receita no `link`) |
+| "internet livre no notebook", "o notebook no hotspot não abre os sites" | `link internet` (proxy; ele configura o proxy no notebook) |
+| "o hotspot tirou a VPN", "pausa a saída com o hotspot" | `saida hotspot status` / `saida hotspot manter` / `saida hotspot pausar` |
 | "manda essa foto/vídeo/arquivo pro PC" | `cel enviar-pc /sdcard/CAMINHO` (chega em Downloads do PC; últimas fotos: `ls -t /sdcard/DCIM/Camera \| head -3`) |
 | "celular como monitor do PC", "segunda tela" | `cel abrir-app com.limelight` e diga: RafaParise > Desktop; para sair de vez: segurar o Desktop > "Sair do Jogo" > SIM |
 | "acha a TV", "controla a TV da sala" | `controle-tv procurar` e depois `controle-tv N volume+` / `mudo` / `ok` / `youtube` (sem N: a última TV); a TV precisa estar na mesma rede |
@@ -106,10 +109,13 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
 - `link status` mostra o que está no ar; `link parar` derruba tudo (o link morre na hora). Ele também para sozinho no fim do tempo.
 - No fim, lembre o Rafael de tocar em "Parar" no ScreenStream (a transmissão segue até ele parar).
 - Falhou "o túnel não saiu": a internet do celular caiu ou a Cloudflare recusou; o link local (`--local`) continua valendo.
+- **Tela COM SOM (06/11): `link tela --som`.** O modo de sempre (Local, MJPEG) NÃO tem som [Certo: README do ScreenStream]. Com som: no ScreenStream, Modo = RTSP (Servidor; padrão porta 8554, caminho `screen` [Certo: `RtspSettings.kt`]), em Áudio ligar "Áudio do dispositivo" (vem desligado), Vídeo = H.264, Iniciar; depois `link tela --som`. O ffmpeg do Termux (`pkg install ffmpeg`, uma vez) copia o vídeo sem recodificar e passa o som para AAC, em HLS; a página toca em qualquer navegador (hls.js 1.5.20, Apache-2.0, baixado uma vez e conferido por SHA-256; sem ele só Safari e algumas TVs). Quem abre toca em "Toque para ouvir o som" (o navegador não toca som sozinho). Atraso: alguns segundos. O comando avisa se veio H.265 ou sem som. O RTSP do ScreenStream não tem senha no modo servidor: quem está na mesma rede consegue abrir `rtsp://IP:8554/screen`. Feito sem o celular (06/11): falta provar no aparelho.
+- **Internet para o notebook do hotspot (06/11): `link internet`** — receita em `VPN-SEMPRE-ATIVA.md` (proxy na porta 3128; ele configura o proxy no Windows e DESATIVA ao terminar).
 
 ## Dados móveis, hotspot e o PC de longe [Provado 05/11]
 - Pelos dados, o PC responde pela Tailscale (100.64.0.1): RDP 3389 (aFreeRDP), ponte 20130, OmniRoute 20128.
-- Hotspot ligado: o `saida` PAUSA sozinho a saída de internet pelo PC (para o hotspot funcionar) e religa ao desligar.
+- Hotspot ligado (desde 06/11): a saída pelo PC CONTINUA (o celular segue sem filtro). O hotspot em si sai pela rede em uso: com o Wi-Fi da escola, o notebook pega o filtro (use `link internet`); com os dados móveis, sai livre. `saida hotspot pausar` volta ao jeito antigo.
+- Escola (06/11): SEDUC-MAQ (notebooks) e SEDUC-ALUNOS (celulares) não se enxergam; o notebook na SEDUC-MAQ não abre `http://10.x...:8080` do celular. Para mostrar a tela no notebook da escola: notebook no hotspot do celular e o endereço do hotspot, ou o link público do `link tela`.
 - ScreenStream pela Tailscale: `http://100.64.0.2:8080` (filtros VPN e Público ligados no app). KDE Connect acha o PC pelo IP da Tailscale.
 
 ## Interface do Rafael (05/11)

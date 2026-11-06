@@ -52,5 +52,14 @@ Fontes: tailscale.com/kb/1103/exit-nodes · tailscale.com/pricing · developer.a
 
 ## Hotspot do celular com a saída pelo PC (05/11)
 - O Tailscale só deixa fora do túnel a rede do Wi-Fi em uso; a rede do hotspot cai no túnel. Conexão que chega do hotspot volta certo; conexão que um app do celular inicia para um aparelho do hotspot se perde.
-- Por isso o guarda `saida` PAUSA a saída enquanto o hotspot está ligado (`saida status` mostra "PAUSADA: hotspot ligado") e religa sozinho quando ele desliga (conferindo o PC e a internet, como na volta do PC).
+- 05/11: o guarda `saida` passou a PAUSAR a saída com o hotspot ligado. **06/11 (na escola) isso virou o problema:** o Rafael ligou o hotspot, a saída pausou e o celular caiu no filtro da SEDUC; os alunos na VPN dele saíam livres [Provável: ícone do hotspot na foto das 07:33].
+- **Desde 06/11 o padrão é MANTER:** com o hotspot ligado a saída pelo PC continua. `saida hotspot pausar` volta ao jeito de 05/11 (pausa e religa sozinho), `saida hotspot manter` desfaz, `saida hotspot status` mostra. Com a saída mantida, o que um app do celular INICIA para um aparelho do hotspot pode falhar; o ScreenStream e o `link` funcionam, porque quem conecta é o aparelho do hotspot.
+- **O hotspot NÃO passa pela VPN** (o Android manda o tráfego dele direto pela rede em uso) [Provável: comportamento do Android, conferido com o que ele viu]. Por isso: hotspot com o Wi-Fi da escola = notebook com filtro; hotspot com os dados móveis = notebook livre (é a rede da operadora). Para o notebook sair pelo PC usando o Wi-Fi da escola: `link internet` (proxy do celular, abaixo).
 - ScreenStream: Filtro de interface com VPN e Filtro de endereço com Público = abre também em `http://100.64.0.2:8080` (Tailscale, de qualquer lugar). KDE Connect: o celular tem o PC por IP (`100.64.0.1`).
+
+## Notebook do hotspot sem o filtro da escola: `link internet` (06/11; feito sem o celular, falta provar na escola)
+- O que é: um proxy (app do Termux) que escuta SÓ no endereço do hotspot (porta 3128), SÓ atende quem está no hotspot, SÓ abre sites públicos (recusa 10.x, 192.168.x, 172.16-31.x, 127.x, 169.254.x e a Tailscale 100.64/10) e SÓ nas portas web (CONNECT 443/8443, HTTP 80/8080). Como é um app do celular, a navegação do notebook sai pela VPN, pelo PC.
+- No celular: hotspot ligado, notebook conectado nele, `link internet` (para sozinho em 120 min; `--minutos N`; `link parar`).
+- No notebook (Windows): Configurações > Rede e Internet > Proxy > Configuração manual > Configurar: Ativado, endereço que o comando mostrar, porta 3128, Salvar. Ao terminar, DESATIVAR (fora do hotspot o notebook fica sem internet). Notebook da escola com o proxy travado pela TI: não funciona; aí só o hotspot com os dados.
+- Limites: só passa o que usa o proxy do Windows (navegador sim; jogos e alguns apps não). A internet sem filtro depende da saída pelo PC ligada (`saida status`).
+- Risco que o Rafael precisa pesar: quem estiver no hotspot e configurar o proxy também sai sem o filtro da SEDUC. Hotspot com senha só dele; não deixar aluno no hotspot com o proxy ligado.

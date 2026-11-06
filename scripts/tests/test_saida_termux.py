@@ -652,6 +652,7 @@ def test_o_laco_de_verdade_suspende_quando_o_pc_some_e_religa_quando_volta(amb):
 # tunel e se perde (o Tailscale so deixa de fora a rede do Wi-Fi). Enquanto o hotspot estiver ligado, a saida fica PAUSADA.
 
 def test_hotspot_ligado_pausa_a_saida_e_desligado_religa(amb):
+    assert amb.roda("hotspot", "pausar")[0] == 0  # jeito de 05/11, agora escolhido
     amb.pede()
     amb.mundo(exit_on=True)
     amb.mundo(hotspot=True)
@@ -667,6 +668,7 @@ def test_hotspot_ligado_pausa_a_saida_e_desligado_religa(amb):
 
 
 def test_hotspot_pausa_mesmo_com_a_saida_ja_suspensa(amb):
+    assert amb.roda("hotspot", "pausar")[0] == 0  # jeito de 05/11, agora escolhido
     amb.pede()
     amb.suspende()
     amb.mundo(hotspot=True, pc=True)
@@ -675,6 +677,7 @@ def test_hotspot_pausa_mesmo_com_a_saida_ja_suspensa(amb):
 
 
 def test_ligar_com_hotspot_ligado_fica_pausada(amb):
+    assert amb.roda("hotspot", "pausar")[0] == 0  # jeito de 05/11, agora escolhido
     amb.mundo(hotspot=True)
     rc, out = amb.roda("ligar")
     assert rc == 0 and "hotspot" in out.lower()
@@ -683,6 +686,7 @@ def test_ligar_com_hotspot_ligado_fica_pausada(amb):
 
 
 def test_status_mostra_a_pausa_do_hotspot(amb):
+    assert amb.roda("hotspot", "pausar")[0] == 0  # jeito de 05/11, agora escolhido
     amb.pede()
     amb.mundo(hotspot=True)
     amb.ciclos(1)
@@ -694,3 +698,32 @@ def test_sem_hotspot_o_guarda_segue_igual(amb):
     amb.mundo(exit_on=True)
     amb.ciclos(3)
     assert amb.am() == [] and amb.arq("hotspot") is None
+
+# ---- hotspot (06/11): por padrao a saida CONTINUA com o hotspot ligado (na escola o celular perdia a internet sem filtro)
+def test_padrao_com_hotspot_a_saida_continua(amb):
+    amb.pede()
+    amb.mundo(exit_on=True, hotspot=True)
+    amb.ciclos(3)
+    assert amb.am() == [] and amb.arq("hotspot") is None
+    assert "CONTINUA" in amb.roda("hotspot", "status")[1]
+
+
+def test_ligar_com_hotspot_no_padrao_liga_de_verdade(amb):
+    amb.mundo(hotspot=True)
+    rc, out = amb.roda("ligar")
+    assert rc == 0 and amb.am()[-1] == ("rafaparise", "true") and amb.arq("hotspot") is None
+
+
+def test_trocar_de_pausar_para_manter_religa_pelo_caminho_normal(amb):
+    amb.roda("hotspot", "pausar")
+    amb.pede()
+    amb.mundo(exit_on=True, hotspot=True)
+    amb.ciclos(1)
+    assert amb.am()[-1] == ("", "true")
+    assert amb.roda("hotspot", "manter")[0] == 0
+    amb.ciclos(2 + 1)
+    assert amb.am()[-1] == ("rafaparise", "true") and amb.arq("hotspot") is None
+
+
+def test_hotspot_uso_errado(amb):
+    assert amb.roda("hotspot", "talvez")[0] == 2

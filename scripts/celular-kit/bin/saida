@@ -2,7 +2,10 @@
 # saida - liga e desliga a SAIDA DE INTERNET PELO PC (Tailscale "exit node") e VIGIA: se o PC some, ou se a internet para de
 # passar por ele, o guarda desliga a saida e a internet volta sozinha (direto pelo Wi-Fi ou pelos dados); quando o PC volta,
 # o guarda religa a saida, conferindo antes que a internet passa. Decidido em 01/11 (memoria/VPN-SEMPRE-ATIVA.md).
-# Hotspot ligado = saida PAUSADA (05/11): os apps falam direto com os aparelhos do hotspot; religa quando ele desligar.
+# Hotspot (06/11): por padrao a saida pelo PC CONTINUA com o hotspot ligado (internet sem filtro no celular, ate no Wi-Fi da
+# escola; quem esta no hotspot sai pelos dados moveis, o Android nao manda o hotspot pela VPN). "saida hotspot pausar" volta
+# ao jeito de 05/11 (pausa enquanto o hotspot existir: um app do celular consegue INICIAR conexao com os aparelhos do hotspot).
+#   saida hotspot manter|pausar|status       o que fazer com a saida enquanto o hotspot estiver ligado (padrao: manter)
 #   saida ligar [--sem-lan] [--vigilia]       confere o PC e a internet, liga a saida e deixa o guarda vigiando
 #   saida desligar                            desliga a saida e para o guarda
 #   saida status                              o que esta ligado, o guarda, o PC e a internet
@@ -67,6 +70,7 @@ internet_depois() { sleep "$ESPERA"; internet_ok && return 0; sleep "$PAUSA"; in
 # Hotspot (ou ancoragem USB/Bluetooth) ligado = a interface dele tem endereco IPv4. O Termux nao le /sys nem /proc/net, mas o
 # getifaddrs da libc funciona. Com a saida pelo PC ligada, o que um app do celular INICIA para um aparelho do hotspot vai para o
 # tunel e se perde (a Tailscale so deixa de fora a rede do Wi-Fi): por isso a saida fica pausada enquanto o hotspot existir.
+hotspot_pausa() { [ -f "$RUN/hotspot-pausar" ] && hotspot_ligado; }  # so pausa se o Rafael escolheu pausar
 hotspot_ligado() {
   python3 - <<'PY' 2>/dev/null
 import ctypes, socket, sys
@@ -128,7 +132,7 @@ ciclo() {
   local lan agora n o e prox
   lan=$(cat "$RUN/desejada" 2>/dev/null); [ "$lan" = false ] || lan=true
   agora=$(date +%s)
-  if hotspot_ligado; then
+  if hotspot_pausa; then
     # hotspot ligado: saida pausada (os aparelhos do hotspot falam direto com o celular; a internet ja e a dos dados moveis)
     if [ ! -f "$RUN/hotspot" ] && manda_saida "" "$lan"; then
       : > "$RUN/hotspot"
@@ -192,7 +196,7 @@ cmd_ligar() {
       *) echo "Opcao desconhecida: $a (use: saida ligar [--sem-lan] [--vigilia])"; return 2 ;;
     esac
   done
-  if hotspot_ligado; then
+  if hotspot_pausa; then
     printf '%s\n' "$lan" > "$RUN/desejada"; : > "$RUN/hotspot"
     rm -f "$RUN/suspensa" "$RUN/proxima" "$RUN/espera"; echo 0 > "$RUN/falhas"; echo 0 > "$RUN/oks"
     if [ "$vig" = 1 ]; then : > "$RUN/vigilia"; else rm -f "$RUN/vigilia"; fi
@@ -263,12 +267,24 @@ cmd_status() {
   return 0
 }
 
+cmd_hotspot() {
+  mkdir -p "$RUN"
+  case "${1:-status}" in
+    manter) rm -f "$RUN/hotspot-pausar"; log "hotspot: a saida pelo PC CONTINUA com ele ligado"
+            echo "Com o hotspot ligado a saida pelo PC CONTINUA: o celular segue com a internet sem filtro; quem esta no hotspot sai pelos seus dados moveis." ;;
+    pausar) : > "$RUN/hotspot-pausar"; log "hotspot: a saida pelo PC PAUSA com ele ligado"
+            echo "Com o hotspot ligado a saida pelo PC PAUSA (apps do celular conseguem iniciar conexao com os aparelhos do hotspot; a internet do celular fica a da rede em uso)." ;;
+    status) if [ -f "$RUN/hotspot-pausar" ]; then echo "Hotspot ligado: a saida PAUSA (escolhido com: saida hotspot pausar)"; else echo "Hotspot ligado: a saida CONTINUA (padrao; para pausar: saida hotspot pausar)"; fi ;;
+    *) echo "Use: saida hotspot manter|pausar|status"; return 2 ;;
+  esac
+}
+
 cmd_log() {
   local n; n=$(num "$1" 15); [ "$n" -ge 1 ] || n=15
   if [ -s "$LOG" ]; then tail -n "$n" "$LOG"; else echo "(registro vazio)"; fi
 }
 
-uso() { sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'; }
+uso() { sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-}" in
   ligar) shift; cmd_ligar "$@" ;;
@@ -277,6 +293,7 @@ case "${1:-}" in
   guarda) cmd_guarda ;;
   vigilia) shift; cmd_vigilia "$@" ;;
   log) shift; cmd_log "$@" ;;
+  hotspot) shift; cmd_hotspot "$@" ;;
   laco) laco ;;
   ciclo) ciclo ;;
   ajuda|-h|--help) uso ;;

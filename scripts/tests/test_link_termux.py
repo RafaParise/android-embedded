@@ -235,3 +235,271 @@ def test_parar_sem_nada_e_status_vazio(amb):
 
 def test_comando_desconhecido(amb):
     assert amb.roda("formatar")[0] == 2
+
+
+# ---- link tela --som (06/11): ScreenStream no modo RTSP -> ffmpeg do Termux -> HLS no navegador (ffmpeg e RTSP FALSOS)
+FALSO_FFMPEG = """#!/bin/bash
+echo "ffmpeg $*" >> "$FAKE_LOG"
+[ -e "$FAKE_DIR/ffmpeg_falha" ] && { echo "rtsp://x: Connection refused"; exit 1; }
+if [ -e "$FAKE_DIR/hevc" ]; then echo "  Stream #0:0: Video: hevc (Main), yuv420p, 720x1600"; else echo "  Stream #0:0: Video: h264 (High), yuv420p, 720x1600"; fi
+[ -e "$FAKE_DIR/sem_audio" ] || echo "  Stream #0:1: Audio: opus, 48000 Hz, stereo"
+saida="${@: -1}"; pasta=$(dirname "$saida")
+printf 'quadro-ts' > "$pasta/s00000.ts"
+printf '#EXTM3U\\n#EXT-X-TARGETDURATION:1\\n#EXTINF:1.0,\\ns00000.ts\\n' > "$saida"
+while true; do sleep 1; done
+"""
+
+
+class Som:
+    """Amb + ffmpeg falso + um 'RTSP' falso (so aceita a conexao: o ffmpeg e falso)."""
+
+    def __init__(self, amb, rtsp=True):
+        self.amb = amb
+        (amb.bin / "ffmpeg").write_text(FALSO_FFMPEG)
+        (amb.bin / "ffmpeg").chmod(0o755)
+        self.rtsp_porta = porta_livre()
+        self.sock = None
+        if rtsp:
+            self.sock = socket.socket()
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.bind(("127.0.0.1", self.rtsp_porta))
+            self.sock.listen(8)
+        amb_env = amb.env
+
+        def env():
+            e = amb_env()
+            e.update({"LINK_RTSP_PORTA": str(self.rtsp_porta), "LINK_HLSJS_URL": "http://127.0.0.1:1/hls.min.js",
+                      "LINK_HLSJS_ARQ": str(amb.base / "kit" / "hls.min.js")})
+            return e
+        amb.env = env
+
+    def fecha(self):
+        if self.sock:
+            self.sock.close()
+
+
+@pytest.fixture
+def som(amb):
+    s = Som(amb)
+    yield s
+    amb.roda("parar")
+    s.fecha()
+
+
+def test_som_sem_ffmpeg_ensina_a_instalar(amb):
+    rc, out = amb.roda("tela", "--som")  # sem ffmpeg no PATH do teste
+    assert rc == 1 and "pkg install ffmpeg" in out
+
+
+def test_som_sem_rtsp_explica_o_modo(amb):
+    s = Som(amb, rtsp=False)
+    rc, out = amb.roda("tela", "--som", "--local")
+    s.fecha()
+    assert rc == 1 and "RTSP" in out and "Audio do dispositivo" in out
+    assert "ffmpeg -" not in amb.log.read_text()
+
+
+def test_som_local_serve_a_pagina_e_o_hls_so_com_a_chave(amb, som):
+    rc, out = amb.roda("tela", "--som", "--local")
+    assert rc == 0, out
+    k = chave(out)
+    log = amb.log.read_text()
+    assert f"rtsp://127.0.0.1:{som.rtsp_porta}/screen" in log and "-c:v copy" in log and "-c:a aac" in log
+    assert "cloudflared" not in log and "ATENCAO" not in out
+    st, _, cab = pega(f"http://127.0.0.1:{amb.porta}/{k}")
+    assert st == 301 and cab["Location"] == f"/{k}/"  # sem a barra: manda para a pagina, sem laco
+    st, corpo, _ = pega(f"http://127.0.0.1:{amb.porta}/{k}/")
+    assert st == 200 and b"<video" in corpo and b"tela.m3u8" in corpo and b"Toque para ouvir" in corpo
+    st, corpo, cab = pega(f"http://127.0.0.1:{amb.porta}/{k}/tela.m3u8")
+    assert st == 200 and corpo.startswith(b"#EXTM3U") and "mpegurl" in cab["Content-Type"] and cab["Cache-Control"] == "no-cache"
+    assert pega(f"http://127.0.0.1:{amb.porta}/{k}/s00000.ts")[1] == b"quadro-ts"
+    # sem a chave, outro nome, caminho para fora ou extensao nao servida: nada
+    for ruim in ("/", "/tela.m3u8", f"/{'0' * 24}/tela.m3u8", f"/{k}/../link-hls.py", f"/{k}/%2e%2e/link-hls.py",
+                 f"/{k}/link-hls.py", f"/{k}/x/tela.m3u8"):
+        assert pega(f"http://127.0.0.1:{amb.porta}{ruim}")[0] == 404, ruim
+    assert "tela com som" in amb.roda("status")[1] and "ffmpeg (RTSP -> HLS): ligado" in amb.roda("status")[1]
+    # sem o hls.js (sem internet no teste) a pagina continua, avisando
+    assert "Sem o hls.js" in out and not (amb.run / "hls" / k / "hls.min.js").exists()
+    amb.roda("parar")
+    assert not (amb.run / "hls" / k).exists() and not (amb.run / "ffmpeg.pid").exists()
+
+
+def test_som_publico_tunel_aponta_para_o_servidor_hls(amb, som):
+    rc, out = amb.roda("tela", "--som")
+    assert rc == 0, out
+    k = chave(out)
+    assert f"https://teste-abc-def.trycloudflare.com/{k}/" in out
+    assert f"--url http://127.0.0.1:{amb.porta}" in amb.log.read_text()
+
+
+def test_som_avisa_hevc_e_falta_de_audio(amb, som):
+    (amb.base / "hevc").write_text("")
+    (amb.base / "sem_audio").write_text("")
+    rc, out = amb.roda("tela", "--som", "--local")
+    assert rc == 0 and "H.265" in out and "SEM som" in out
+
+
+def test_som_ffmpeg_falha_mostra_o_motivo_e_limpa(amb, som):
+    (amb.base / "ffmpeg_falha").write_text("")
+    rc, out = amb.roda("tela", "--som", "--local")
+    assert rc == 1 and "Connection refused" in out
+    assert not (amb.run / "hls.pid").exists() and "Nada compartilhado" in amb.roda("status")[1]
+
+
+class FalsoCDN(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        corpo = b"/* hls.js adulterado */"
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def log_message(self, *a):
+        pass
+
+
+def test_som_recusa_hls_js_com_sha_diferente(amb, som):
+    p = porta_livre()
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", p), FalsoCDN)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    velho = amb.env
+
+    def env():
+        e = velho()
+        e["LINK_HLSJS_URL"] = f"http://127.0.0.1:{p}/hls.min.js"
+        return e
+    amb.env = env
+    try:
+        rc, out = amb.roda("tela", "--som", "--local")
+    finally:
+        srv.shutdown()
+    k = chave(out)
+    assert rc == 0 and "Sem o hls.js" in out
+    assert not (amb.base / "kit" / "hls.min.js").exists() and not (amb.run / "hls" / k / "hls.min.js").exists()
+
+
+# ---- link internet (06/11): proxy do celular para o notebook do hotspot sair pelo PC (sem o filtro da rede da escola)
+class SiteFalso(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        corpo = b"site:" + self.path.encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def log_message(self, *a):
+        pass
+
+
+def proxy_env(amb, **extra):
+    velho = amb.env
+    amb.proxy_porta = porta_livre()
+
+    def env():
+        e = velho()
+        e.update({"LINK_PROXY_PORTA": str(amb.proxy_porta)}, **extra)
+        return e
+    amb.env = env
+
+
+def conversa(porta, texto, ler=True):
+    s = socket.create_connection(("127.0.0.1", porta), timeout=5)
+    try:
+        s.sendall(texto)
+        if not ler:
+            return s
+        dados = b""
+        while True:
+            try:
+                b = s.recv(65536)
+            except socket.timeout:
+                break
+            if not b:
+                break
+            dados += b
+        return dados
+    finally:
+        if ler:
+            s.close()
+
+
+def test_internet_sem_hotspot_explica(amb):
+    proxy_env(amb, LINK_IPS="wlan0=127.0.0.1")
+    rc, out = amb.roda("internet")
+    assert rc == 1 and "hotspot do celular esta desligado" in out and not (amb.run / "internet.pid").exists()
+
+
+def test_internet_proxy_http_e_connect_ate_site_publico(amb):
+    proxy_env(amb, LINK_PROXY_TESTE_LOCAL="1")
+    site = porta_livre()
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", site), SiteFalso)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        rc, out = amb.roda("internet", "--minutos", "5")
+        assert rc == 0, out
+        assert f"Endereco: 127.0.0.1 | Porta: {amb.proxy_porta}" in out and "DESATIVE" in out and "saida status" in out
+        assert "internet" in amb.roda("status")[1]
+        # a porta web do teste nao e 80/8080: so o CONNECT a 443/8443 e o HTTP a 80/8080 passam
+        r = conversa(amb.proxy_porta, f"GET http://127.0.0.1:{site}/x HTTP/1.1\r\nHost: a\r\n\r\n".encode())
+        assert r.startswith(b"HTTP/1.1 403")
+        r = conversa(amb.proxy_porta, f"CONNECT 127.0.0.1:{site} HTTP/1.1\r\n\r\n".encode())
+        assert r.startswith(b"HTTP/1.1 403")
+    finally:
+        srv.shutdown()
+    assert "Nada compartilhado" not in amb.roda("status")[1]
+    amb.roda("parar")
+    assert not (amb.run / "internet.pid").exists()
+
+
+def test_internet_proxy_conecta_na_porta_web(amb):
+    """CONNECT de verdade ate um 'site' na porta 8443 (precisa estar livre na maquina de teste)."""
+    proxy_env(amb, LINK_PROXY_TESTE_LOCAL="1")
+    try:
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 8443), SiteFalso)
+    except OSError:
+        pytest.skip("porta 8443 ocupada")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert amb.roda("internet")[0] == 0
+        s = conversa(amb.proxy_porta, b"CONNECT 127.0.0.1:8443 HTTP/1.1\r\nHost: x\r\n\r\n", ler=False)
+        cab = b""
+        while b"\r\n\r\n" not in cab:
+            cab += s.recv(1024)
+        assert cab.startswith(b"HTTP/1.1 200")
+        s.sendall(b"GET /dentro HTTP/1.0\r\n\r\n")
+        dados = b""
+        while True:
+            b = s.recv(65536)
+            if not b:
+                break
+            dados += b
+        s.close()
+        assert dados.endswith(b"site:/dentro")
+    finally:
+        srv.shutdown()
+
+
+@pytest.mark.parametrize("alvo", ["127.0.0.1:443", "10.72.29.179:443", "192.168.0.1:443", "100.64.0.1:443",
+                                  "169.254.1.1:443", "localhost:443"])
+def test_internet_recusa_endereco_interno(amb, alvo):
+    proxy_env(amb)  # sem a chave de teste: o 127.0.0.1 tambem e interno
+    assert amb.roda("internet")[0] == 0
+    assert conversa(amb.proxy_porta, f"CONNECT {alvo} HTTP/1.1\r\n\r\n".encode()).startswith(b"HTTP/1.1 403")
+
+
+@pytest.mark.parametrize("pedido", [b"CONNECT smtp.exemplo.com:25 HTTP/1.1\r\n\r\n", b"GET ftp://a/b HTTP/1.1\r\n\r\n",
+                                    b"lixo\r\n\r\n", b"GET http://exemplo.com:22/ HTTP/1.1\r\n\r\n"])
+def test_internet_recusa_porta_e_pedido_estranho(amb, pedido):
+    proxy_env(amb)
+    assert amb.roda("internet")[0] == 0
+    assert re.match(rb"HTTP/1.1 40[03]", conversa(amb.proxy_porta, pedido))
+
+
+def test_internet_so_atende_quem_esta_no_hotspot(amb):
+    proxy_env(amb, LINK_PROXY_TESTE_LOCAL="1", LINK_PROXY_REDE="10.9.9.0/24")
+    assert amb.roda("internet")[0] == 0
+    try:
+        r = conversa(amb.proxy_porta, b"CONNECT 127.0.0.1:8443 HTTP/1.1\r\n\r\n")
+    except ConnectionResetError:
+        r = b""
+    assert r == b""  # fecha sem responder
