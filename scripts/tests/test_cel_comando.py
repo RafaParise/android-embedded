@@ -499,16 +499,31 @@ def test_viagem_sem_pasta_no_cartao(cel):
     assert rc == 1 and "cartao SD" in s and "SplashActivity" not in cel.registro()
 
 
-def test_viagem_vigia_so_avisa_o_calor_e_avisa_quando_a_gravacao_para(viagem):
+def test_viagem_vigia_so_avisa_o_calor_e_desiste_depois_de_3_quedas(viagem):
     vg = viagem.cel.dir / "home" / ".cache" / "viagem"
     vg.mkdir(parents=True, exist_ok=True)
     (vg / "ligada").write_text("")
     (viagem.cel.dir / "temp").write_text("46.2")
-    rc, _ = viagem.roda("viagem", "vigiar")  # nada gravando: avisa o calor, percebe a parada em 2 voltas e sai
+    (viagem.cel.dir / "fadcam_falha").write_text("")  # o FadCam nao volta: retoma 3 vezes e desiste com aviso
+    rc, _ = viagem.roda("viagem", "vigiar")
     reg = viagem.cel.registro()
     assert rc == 0 and "Celular QUENTE: 46 C" in reg and "Nada foi fechado" in reg and "vibra" in reg
-    assert "PAROU" in reg and not (vg / "ligada").exists()
+    assert reg.count("RecordingStartActivity") == 3 and "PAROU" in reg and "3 vezes" in reg and not (vg / "ligada").exists()
     assert "RecordingStopActivity" not in reg and "force-stop" not in reg  # nunca fecha nada sozinho
+
+
+def test_viagem_queda_do_fadcam_volta_sozinha(viagem):
+    assert viagem.roda("viagem", "iniciar")[0] == 0
+    (viagem.cel.dir / "gravando").unlink()  # o FadCam "caiu" (ninguem tocou em Parar)
+    import time
+    for _ in range(100):
+        if "VOLTOU sozinha" in viagem.cel.registro():
+            break
+        time.sleep(0.2)
+    reg = viagem.cel.registro()
+    assert "VOLTOU sozinha" in reg and reg.count("RecordingStartActivity") >= 2
+    assert "GRAVANDO" in viagem.roda("viagem", "status")[1]
+    viagem.roda("viagem", "parar")
 
 
 def test_viagem_vigia_atencao_sem_vibrar(viagem):
@@ -516,6 +531,7 @@ def test_viagem_vigia_atencao_sem_vibrar(viagem):
     vg.mkdir(parents=True, exist_ok=True)
     (vg / "ligada").write_text("")
     (viagem.cel.dir / "temp").write_text("43")
+    (viagem.cel.dir / "fadcam_falha").write_text("")  # sem gravacao que volte: a vigia termina depois das tentativas
     viagem.roda("viagem", "vigiar")
     reg = viagem.cel.registro()
     assert "esquentando: 43 C" in reg and "QUENTE" not in reg

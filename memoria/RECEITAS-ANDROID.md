@@ -56,8 +56,11 @@ O FadCam (F-Droid, GPL-3.0, 3.0.1, hash conferido com o índice assinado) grava 
   foco contínuo (não há foco fixo no infinito), sem redução de ruído (experimental), sem busca de atualização. App em inglês (não tem português).
 - Medido: 3 min 9 s, 1920x1080, 15,9 Mbps, 0 erro ao decodificar; gravação seguiu com o Organic Maps em tela cheia, girando a tela e abrindo a barra de avisos.
 - Calor: o `cel viagem` vigia a bateria a cada minuto e só AVISA (42 °C: aviso; 45 °C: aviso com vibração). Nada é fechado por ele.
-- Limites [Certo: registro de falhas do Android, 06/11]: (1) reabrir o FadCam durante a gravação PODE travá-lo (1 em 5 vezes) e a gravação para:
-  não reabra; o `cel viagem` avisa "a gravação PAROU" se isso acontecer. (2) Lanterna durante a gravação: o FadCam acende, mas ao apagar TRAVA:
+- Quedas do FadCam [Certo: registro de falhas, 06/11]: reabrir o app durante a gravação às vezes o derruba. CONSERTO (06/11 ~15:10): a vigia
+  do `cel viagem` (a cada 15 s) RETOMA sozinha a gravação e reabre o mapa (provado: queda forçada 15:08:11, nova parte 15:08:41, aviso
+  "VOLTOU sozinha"); até 3 retomadas em 10 min, depois avisa "PAROU". A parte interrompida NÃO se perde: o FadCam grava MP4 fragmentado
+  (moof), conferido: a parte cortada abriu com 20,5 s. O "Stop" do aviso do FadCam foi ESCONDIDO: parar = botão "Parar" do aviso
+  "Gravando a viagem" (testado) ou o Matrix; qualquer outra parada é tratada como queda. (2) Lanterna durante a gravação: o FadCam acende, mas ao apagar TRAVA:
   `cel viagem lanterna` só explica. (3) O FadCam cria um arquivo vazio de ~1 KB ao começar pelo comando; o `cel viagem parar` apaga só esses.
 - Precisa: `termux-am` (pkg) e o Termux com "Sobrepor a outros apps" (appops SYSTEM_ALERT_WINDOW allow, dado em 06/11; desfaz: `appops set com.termux SYSTEM_ALERT_WINDOW default`).
 

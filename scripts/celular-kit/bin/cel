@@ -398,6 +398,14 @@ case "${1:-status}" in
     tam() { local f; f=$(ultimo); [ -n "$f" ] && wc -c < "$f" 2>/dev/null || echo 0; }
     crescendo() { local a b; a=$(tam); sleep "${VIAGEM_OLHA:-3}"; b=$(tam); [ "$b" -gt "$a" ]; }
     temperatura() { termux-battery-status 2>/dev/null | python3 -c 'import json,sys; print(int(float(json.load(sys.stdin)["temperature"])))' 2>/dev/null; }
+    comeca() { # o FadCam frio TRAVA se mandar gravar na hora (06/11: ForegroundServiceDidNotStartInTime): abre, espera, grava
+      am start -n com.fadcam/.SplashActivity >/dev/null 2>&1 || return 1
+      sleep "${VIAGEM_ESPERA:-7}"
+      am start -n com.fadcam/.RecordingStartActivity >/dev/null 2>&1
+      sleep "${VIAGEM_ESPERA2:-5}"
+      [ -f "$VG/sem-mapa" ] || am start -n app.organicmaps/.DownloadResourcesActivity >/dev/null 2>&1
+      return 0
+    }
     aviso() { # $1 id, $2 titulo, $3 texto, resto = opcoes extras
       command -v termux-notification >/dev/null 2>&1 || return 0
       local id=$1 t=$2 x=$3; shift 3
@@ -407,11 +415,8 @@ case "${1:-status}" in
       iniciar|ligar|gravar)
         [ -n "$PASTA" ] && [ -d "$PASTA" ] || { echo "Nao achei a pasta Viagens no cartao SD (o cartao esta no celular?)."; exit 1; }
         if crescendo; then echo "Ja esta gravando: $(basename "$(ultimo)")."; exit 0; fi
-        am start -n com.fadcam/.SplashActivity >/dev/null 2>&1 || { echo "Nao abri o FadCam (instalado?)."; exit 1; }
-        sleep "${VIAGEM_ESPERA:-7}"  # o FadCam frio TRAVA se mandar gravar na hora (06/11: ForegroundServiceDidNotStartInTime)
-        am start -n com.fadcam/.RecordingStartActivity >/dev/null 2>&1
-        sleep "${VIAGEM_ESPERA2:-5}"
-        [ "${3:-}" = "--sem-mapa" ] || am start -n app.organicmaps/.DownloadResourcesActivity >/dev/null 2>&1
+        if [ "${3:-}" = "--sem-mapa" ]; then : > "$VG/sem-mapa"; else rm -f "$VG/sem-mapa"; fi
+        comeca || { echo "Nao abri o FadCam (instalado?)."; exit 1; }
         if ! crescendo; then
           echo "A gravacao NAO comecou. Abra o FadCam e toque em Start (se aparecer 'o app apresenta falhas', toque em Fechar app e tente de novo)."
           exit 1
@@ -419,15 +424,16 @@ case "${1:-status}" in
         : > "$VG/ligada"
         nohup bash "$SELF" viagem vigiar >/dev/null 2>&1 </dev/null &
         echo $! > "$VG/vigia.pid"
-        aviso viagem "Gravando a viagem" "FadCam no cartao (pasta Viagens). Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
-        echo "Gravando a viagem no cartao ($PASTA), em segundo plano; o mapa ficou na tela. Parar: cel viagem parar (ou Stop no aviso do FadCam)."
+        aviso viagem "Gravando a viagem" "Parar: so por ESTE botao (ou pelo Matrix). Caiu? Volta sozinha. Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
+        echo "Gravando a viagem no cartao ($PASTA), em segundo plano; o mapa ficou na tela."
+        echo "Parar: botao Parar do aviso 'Gravando a viagem' ou cel viagem parar. Se o FadCam cair (ate reaberto pelo icone), a gravacao VOLTA sozinha."
         echo "Calor: so AVISO (nada e fechado)."
         ;;
       parar)
         rm -f "$VG/ligada"
         am start -n com.fadcam/.RecordingStopActivity >/dev/null 2>&1
         p=$(cat "$VG/vigia.pid" 2>/dev/null); case "$p" in ''|*[!0-9]*) ;; *) kill "$p" 2>/dev/null ;; esac; rm -f "$VG/vigia.pid"
-        command -v termux-notification-remove >/dev/null 2>&1 && { termux-notification-remove viagem; termux-notification-remove viagem-calor; } >/dev/null 2>&1
+        command -v termux-notification-remove >/dev/null 2>&1 && { termux-notification-remove viagem; termux-notification-remove viagem-calor; termux-notification-remove viagem-volta; } >/dev/null 2>&1
         sleep "${VIAGEM_OLHA:-3}"
         # o comando de comecar cria um arquivo vazio (~1 KB) ao lado do video: so esses somem
         find "$PASTA" -maxdepth 1 -name 'FadCam_*.mp4' -size -4k -delete 2>/dev/null
@@ -444,8 +450,8 @@ case "${1:-status}" in
         echo "Com a gravacao ligada nao ha lanterna segura: o FadCam acende, mas ao apagar ele trava e a gravacao para (testado 06/11)."
         echo "A noite o flash so reflete no para-brisa. Se precisar mesmo de luz: cel viagem parar, cel lanterna ligar."
         exit 1 ;;
-      vigiar) # (interno) a cada minuto: temperatura e se a gravacao segue; so AVISA, nunca fecha app
-        parado=0
+      vigiar) # (interno) a cada 15 s: temperatura (so AVISA, nunca fecha app) e se a gravacao segue (caiu = retoma sozinho)
+        parado=0; : > "$VG/retomadas"
         while [ -f "$VG/ligada" ]; do
           t=$(temperatura)
           if [ -n "$t" ] && [ "$t" -ge "${VIAGEM_QUENTE:-45}" ]; then
@@ -455,13 +461,24 @@ case "${1:-status}" in
             aviso viagem-calor "Celular esquentando: $t C" "So aviso: a gravacao e o mapa seguem."
           fi
           if crescendo; then parado=0; else parado=$((parado + 1)); fi
-          if [ "$parado" -ge 2 ]; then
-            rm -f "$VG/ligada"
-            aviso viagem "A gravacao da viagem PAROU" "Pelo Stop ou por falha do FadCam. Gravar de novo: cel viagem iniciar" --priority high
-            command -v termux-vibrate >/dev/null 2>&1 && termux-vibrate -d 300 >/dev/null 2>&1
-            break
+          if [ "$parado" -ge 2 ] && [ -f "$VG/ligada" ]; then
+            # parou sem o "Parar" (o unico jeito de parar e o botao do aviso ou o Matrix): o FadCam caiu -> retoma sozinho
+            agora=$(date +%s)
+            recentes=$(awk -v l=$((agora - 600)) '$1 > l' "$VG/retomadas" 2>/dev/null | wc -l)
+            if [ "$recentes" -ge "${VIAGEM_RETOMADAS:-3}" ]; then
+              rm -f "$VG/ligada"
+              aviso viagem "A gravacao da viagem PAROU" "O FadCam caiu 3 vezes em 10 min. Gravar de novo: cel viagem iniciar" --priority high
+              command -v termux-vibrate >/dev/null 2>&1 && termux-vibrate -d 300 >/dev/null 2>&1
+              break
+            fi
+            echo "$agora" >> "$VG/retomadas"
+            comeca
+            if crescendo; then
+              parado=0
+              aviso viagem-volta "A gravacao caiu e VOLTOU sozinha" "O FadCam travou; um novo arquivo comecou na pasta Viagens." --priority high
+            fi
           fi
-          sleep "${VIAGEM_INTERVALO:-60}"
+          sleep "${VIAGEM_INTERVALO:-15}"
         done
         ;;
       *) echo "Use: cel viagem iniciar [--sem-mapa]|parar|status"; exit 2 ;;
