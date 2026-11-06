@@ -229,8 +229,9 @@ public class Papel extends WallpaperService {
         private boolean ajustaTamanho() {
             if (!tamanhoLivre) return false;
             medeTela();
-            int w = tela.x + 2 * Math.abs(deslX);
-            int h = tela.y + 2 * Math.abs(deslY);
+            boolean deitado = tela.x > tela.y;  // deitado: superficie = tela (fixo; o deslocamento medido deitado e 0)
+            int w = deitado ? tela.x : tela.x + 2 * Math.abs(deslX);
+            int h = deitado ? tela.y : tela.y + 2 * Math.abs(deslY);
             if (w <= 0 || h <= 0) return false;
             if (w != largura || h != altura) {
                 try {
@@ -335,6 +336,12 @@ public class Papel extends WallpaperService {
                 c.drawColor(Color.BLACK);
                 if (img == null || largura <= 0 || altura <= 0) return;
                 medeTela();
+                // 06/11: NUNCA faixa preta. A superficie inteira recebe o fundo desfocado da propria imagem; se a tela
+                // inicial deslocar o papel de um jeito diferente do medido (05/11: -321; 06/11: 0), aparece fundo, nao preto.
+                float sfT = Math.max(largura / (float) fundo.getWidth(), altura / (float) fundo.getHeight());
+                mat.setScale(sfT, sfT);
+                mat.postTranslate((largura - fundo.getWidth() * sfT) / 2f, (altura - fundo.getHeight() * sfT) / 2f);
+                c.drawBitmap(fundo, mat, escuro);
                 float[] v = visivel();
                 float dw = Math.min(tela.x, largura), dh = Math.min(tela.y, altura);
                 c.save();
@@ -404,6 +411,10 @@ public class Papel extends WallpaperService {
 
         @Override
         public void onOffsetsChanged(float xO, float yO, float xPasso, float yPasso, int xPx, int yPx) {
+            // 06/11 (pedido do Rafael): DEITADO o papel fica FIXO ao arrastar (nada de reposicionar e redesenhar a cada
+            // pagina: mais fluido e gasta menos). A superficie deitada tem o tamanho da tela, entao o sistema nao a move.
+            medeTela();
+            if (tela.x > tela.y) return;
             xOff = xO;
             yOff = yO;
             // So confia na tela inicial quando ela de fato informa paginas (valor fora do meio).

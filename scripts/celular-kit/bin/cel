@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # cel - a mao do Qwen (e do Rafael) no proprio celular, sem root e sem PC: o adb do Termux ligado ao proprio aparelho pela depuracao sem fio.
+#   cel faz "frase"                 o Rafael (ou o Matrix) diz o que quer com as palavras dele e o cel roda o comando certo (--lista; --mostra so diz)
 #   cel status                      o que esta ligado e se a conexao com o sistema esta de pe
 #   cel conectar                    liga a conexao (religa a depuracao sem fio se o Termux tiver a permissao); `cel parear PORTA CODIGO` so na 1a vez
 #   cel wifi ligar|desligar|reiniciar · cel bluetooth ligar|desligar · cel dados ligar|desligar · cel aviao ligar|desligar
@@ -9,7 +10,7 @@
 #   cel acordado ligar|desligar|status         Permanecer acordado enquanto carrega (tela nao apaga no cabo)
 #   cel lanterna ligar|desligar                Lanterna (Termux:API; funciona sem a depuracao sem fio)
 #   cel viagem iniciar|parar|status            camera de viagem: FadCam grava em 2o plano no cartao, mapa na tela, calor so avisa
-#   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados em segundo plano
+#   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados (RAM antes/depois; --tudo para tambem o ScreenStream ocioso)
 #   cel abrir TELA | cel telas      abre a tela de configuracao (wifi, bluetooth, tela, som, bateria, apps, armazenamento, desenvolvedor...)
 #   cel abrir-app PACOTE · cel apps [texto] · cel procurar TEXTO (arquivos, apps e configuracoes)
 #   cel tv                          espelhar na TV: abre a transmissao do Android e diz que apps de espelhamento existem
@@ -311,7 +312,98 @@ liga_desliga() { # $1 = servico do svc, $2 = ligar|desligar, $3 = nome para o Ra
   esac
 }
 
+faz_normal() { # minusculas, sem acento e sem pontuacao, com espaco nas pontas (para casar palavra inteira)
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$*" | python3 -c 'import sys,unicodedata as u
+t=sys.stdin.read().lower()
+t="".join(c for c in u.normalize("NFD",t) if u.category(c)!="Mn")
+for c in "?!.,;:\"()": t=t.replace(c," ")
+print(" "+" ".join(t.split())+" ")'
+  else printf ' %s ' "$*" | tr 'A-Z' 'a-z'; fi
+}
+faz_acha() { # $f = frase normalizada -> CMD (comando fixo, nunca texto do usuario) ou DICA
+  CMD=""; DICA=""
+  tem() { local x; for x in "$@"; do case "$f" in *"$x"*) return 0 ;; esac; done; return 1; }
+  para_() { case "$f" in " para "*|" pare "*) return 0 ;; esac; tem " para de " " pare " " parar " "termin" "encerr" " chega de" " stop" "finaliz" " para a grav" " para o link" " para a transm" " para a camera" " para o video"; }
+  desl() { tem "deslig" " apaga" "desativ" " corta " " tira "; }
+  liga() { tem " liga" " ligue" "acend" " ativa" " ative" " abre " " abrir " " coloca" " poe " " inicia" " comeca"; }
+  if tem "grava a tela" "gravar a tela" "grava minha tela" "gravar minha tela" "gravacao da tela" "grava a minha tela"; then
+    if para_ || desl; then CMD="cel obs parar-gravacao"; else CMD="cel obs gravar-tela"; fi
+  elif tem "viagem" "dashcam" "camera do carro" "camera de viagem" "grava o caminho" "grava a estrada" "grava o trajeto" "grava enquanto" "gravando" "gravacao"; then
+    if tem "ta gravando" "esta gravando" "como esta" "status" "gravando mesmo"; then CMD="cel viagem status"
+    elif para_ || desl; then CMD="cel viagem parar"
+    elif tem "lanterna" "flash" "luz"; then CMD="cel viagem lanterna"
+    else CMD="cel viagem iniciar"; fi
+  elif tem "lanterna"; then
+    if desl; then CMD="cel lanterna desligar"; else CMD="cel lanterna ligar"; fi
+  elif tem "otimiz" "libera memoria" "libera a memoria" "libera ram" "liberar ram" "liberar memoria" " lento" "travando" "acelera" "mais rapido" "limpa a memoria" "fecha os apps" "fechar os apps" "desempenho" "processamento"; then
+    if tem " tudo" "completo" "maximo" " total"; then CMD="cel otimizar --tudo"; else CMD="cel otimizar"; fi
+  elif tem "cache"; then CMD="cel limpar"
+  elif tem "faixa preta" "faixa cinza" "tarja" && tem "obs" "camera" "webcam" "aula"; then CMD="cel obs verificar"
+  elif tem "webcam" "camera no pc" "camera no obs" "camera do pc" "vira camera" "virar camera" "camera para a aula" "camera na aula" "camera pra aula"; then
+    if para_ || desl; then CMD="cel obs parar"; elif tem "frontal" "selfie" "da frente"; then CMD="cel obs frontal"; else CMD="cel obs camera"; fi
+  elif tem "para de transmitir" "para o link" "fecha o link" "parar o link" "parar de transmitir"; then CMD="link parar"
+  elif tem " tela" && tem " tv" "televis" "notebook" "aluno" "transmit" "espelh" "compartilh" "manda" "mostra" "projet"; then
+    if para_ || desl; then CMD="link parar"; elif tem " som" "audio"; then CMD="link tela --som"; elif tem "cheia" "preench" "inteira"; then CMD="link tela --preencher"; else CMD="link tela"; fi
+  elif tem "internet" && tem "notebook" "computador da escola" "hotspot" "roteador" "livre" "sem filtro" "sem bloqueio"; then CMD="link internet"
+  elif tem "reinicia a internet" "reiniciar a internet" "internet caiu" "internet ruim" "sem internet" "internet lenta" "internet travou"; then CMD="cel internet reiniciar"
+  elif tem " vpn" "saida pelo pc" "exit node" "internet pelo pc"; then
+    if tem "esta ligad" "ta ligad" "status" "como esta" "funcionando"; then CMD="saida status"
+    elif desl; then CMD="saida desligar"; elif liga; then CMD="saida ligar"; else CMD="saida status"; fi
+  elif tem "wifi" "wi-fi" "wi fi" "wireless"; then
+    if tem "reinici"; then CMD="cel wifi reiniciar"; elif desl; then CMD="cel wifi desligar"; else CMD="cel wifi ligar"; fi
+  elif tem "bluetooth"; then
+    if desl; then CMD="cel bluetooth desligar"; else CMD="cel bluetooth ligar"; fi
+  elif tem "modo aviao" " aviao"; then
+    if desl; then CMD="cel aviao desligar"; else CMD="cel aviao ligar"; fi
+  elif tem "dados moveis" " dados " " 4g" " 3g"; then
+    if desl; then CMD="cel dados desligar"; else CMD="cel dados ligar"; fi
+  elif tem "acordado" "nao apaga no cabo" "tela nao apagar"; then
+    if desl; then CMD="cel acordado desligar"; else CMD="cel acordado ligar"; fi
+  elif tem "apaga a tela" "apagar a tela" "escurece" "desliga a tela" "tela apagada"; then CMD="cel tela apagar"
+  elif tem "acende a tela" "acender a tela" "liga a tela" "clareia"; then CMD="cel tela acender"
+  elif tem "reiniciou" "reinicio sozinho" "desligou sozinho" "reiniciando sozinho" "porque reiniciou" "por que reiniciou"; then CMD="motivo"
+  elif tem "manda" "envia" "mandar" "enviar" && tem " pc" "computador"; then DICA='cel enviar-pc CAMINHO   (ex.: cel enviar-pc ~/storage/dcim/Camera/foto.jpg)'
+  elif tem "bateria" "como esta o celular" "status do celular" "o que esta ligado"; then CMD="cel status"
+  elif tem "abre o app" "abrir o app" "abre o aplicativo"; then DICA='cel apps NOME (acha o pacote) e depois cel abrir-app PACOTE'
+  fi
+  return 0
+}
+
 case "${1:-status}" in
+  faz|frase) # 06/11: o Rafael fala do jeito dele ("grava a viagem", "libera a memoria") e o cel roda o comando certo
+    shift
+    if [ "${1:-}" = --lista ] || [ $# = 0 ]; then
+      echo 'Frases que o cel faz entende (do jeito que vier, com ou sem acento):'
+      echo '  grava a viagem / para a gravacao / ta gravando?   -> cel viagem iniciar|parar|status'
+      echo '  liga/apaga a lanterna                              -> cel lanterna ligar|desligar'
+      echo '  libera a memoria / celular lento / otimiza tudo    -> cel otimizar [--tudo]'
+      echo '  limpa o cache                                      -> cel limpar'
+      echo '  vira camera do PC / camera frontal / faixa preta   -> cel obs camera|frontal|verificar'
+      echo '  grava a minha tela (no PC)                         -> cel obs gravar-tela'
+      echo '  manda a tela para a TV / com som / tela cheia      -> link tela [--som|--preencher] · para de transmitir -> link parar'
+      echo '  internet livre para o notebook                     -> link internet'
+      echo '  liga/desliga a VPN / a VPN esta ligada?            -> saida ligar|desligar|status'
+      echo '  wifi, bluetooth, dados, modo aviao (liga/desliga)  -> cel wifi|bluetooth|dados|aviao ...'
+      echo '  apaga/acende a tela · internet caiu · reiniciou sozinho · bateria/status'
+      exit 0
+    fi
+    so=0; [ "${1:-}" = --mostra ] && { so=1; shift; }   # --mostra: so diz o que faria
+    f=$(faz_normal "$*"); faz_acha
+    if [ -n "$DICA" ]; then echo "Para isso falta um detalhe. Use: $DICA"; exit 3; fi
+    if [ -z "$CMD" ]; then echo "Nao reconheci \"$*\". Veja as frases que conheco: cel faz --lista"; exit 4; fi
+    echo "Entendi: $CMD"
+    [ "$so" = 1 ] && exit 0
+    if [ "$CMD" = motivo ]; then
+      precisa; m=$(sh_ "getprop sys.boot.reason" | tr -d '\r')
+      echo "Motivo do ultimo reinicio: ${m:-desconhecido}"
+      case "$m" in *watchdog*) echo "= o proprio Android travou e o vigia dele reiniciou (06/11: aconteceu com pouca memoria e rede trocando; cel otimizar ajuda)." ;;
+        reboot|*userrequested*|*shutdown*) echo "= alguem (ou um comando) pediu para reiniciar." ;; esac
+      exit 0
+    fi
+    set -- $CMD   # comando fixo da tabela acima (sem texto do usuario)
+    if [ "$1" = cel ]; then shift; exec bash "$(readlink -f "$0" 2>/dev/null || echo "$0")" "$@"; fi
+    exec "$@" ;;
   status)
     if conecta 2>/dev/null; then
       S=$(serial)
@@ -505,9 +597,37 @@ case "${1:-status}" in
     sh_ "pm trim-caches 100G" >/dev/null
     depois=$(sh_ "df /data | tail -1" | awk '{print $4}')
     echo "Caches limpos (os dados dos apps ficam). Livre antes: ${antes:-?} KB, depois: ${depois:-?} KB." ;;
-  otimizar)
-    precisa; sh_ "pm trim-caches 100G; am kill-all; sync" >/dev/null
-    echo "Caches limpos e apps parados em segundo plano fechados (os abertos e os protegidos ficam)." ;;
+  otimizar) # 06/11: fecha o que esta PARADO (em cache) para a RAM e a CPU irem as janelas abertas; nada visivel, nada com servico
+    # `am kill` so mata processo em cache e o app continua recebendo avisos (o Android o acorda); force-stop so nos utilitarios e
+    # no FadCam parados (force-stop corta os avisos ate abrir de novo). Gravando a viagem, o FadCam e servico: nao entra.
+    precisa
+    tudo=0; [ "${2:-}" = --tudo ] && tudo=1
+    dados=$(sh_ "echo M=\$(grep MemAvailable /proc/meminfo | tr -s ' ' | cut -d' ' -f2); echo K=\$(settings get secure default_input_method); dumpsys activity lru | grep ' cch' | sed 's/.*[0-9]:\([^/:]*\).*/C=\1/'; dumpsys activity services info.dvkr.screenstream | grep -q ServiceRecord && echo SS=1; true #OTIMIZA-LER" 2>/dev/null | tr -d '\r')
+    m0=$(printf '%s\n' "$dados" | sed -n 's/^M=//p' | head -1)
+    tecl=$(printf '%s\n' "$dados" | sed -n 's/^K=//p' | head -1); tecl=${tecl%%/*}
+    fica=" ${CEL_OTIMIZA_FICA:-} $tecl com.android.phone com.samsung.android.messaging com.google.android.apps.messaging com.sec.android.app.clockpackage com.sec.android.app.launcher com.samsung.android.honeyboard br.embeeded.papel com.termux com.termux.api com.termux.boot com.tailscale.ipn org.kde.kdeconnect_tp com.akylas.enforcedoze info.dvkr.screenstream "
+    uteis=" com.kgurgul.cpuinfo de.markusfisch.android.binaryeye org.localsend.localsend_app com.fadcam "
+    cmd="pm trim-caches 100G >/dev/null 2>&1"; fech=""; n=0; paro=""
+    for pk in $(printf '%s\n' "$dados" | sed -n 's/^C=//p' | sort -u); do
+      case "$pk" in ''|*[!A-Za-z0-9._]*) continue ;; android|com.android.*|com.google.android.gms*|com.google.android.gsf*|com.google.android.webview|com.samsung.android.kgclient|com.sec.android.app.launcher) continue ;; esac   # sistema: nem tenta (06/11: o am os recusa, mas fica claro)
+      case "$fica" in *" $pk "*) continue ;; esac
+      case "$uteis" in *" $pk "*) cmd="$cmd; am force-stop $pk"; paro="$paro ${pk##*.}"; continue ;; esac
+      cmd="$cmd; am kill $pk"; n=$((n + 1)); fech="$fech ${pk##*.}"
+    done
+    ss=""
+    if printf '%s\n' "$dados" | grep -qx 'SS=1'; then
+      if [ "$tudo" = 1 ] && ! pgrep -f 'link-servidor.py|link-proxy.py|link-hls' >/dev/null 2>&1; then
+        cmd="$cmd; am force-stop info.dvkr.screenstream"; ss="ScreenStream: estava transmitindo sem ninguem no link: ENCERRADO."
+      elif [ "$tudo" = 1 ]; then ss="ScreenStream: transmitindo para um link aberto: FICOU (pare com: link parar)."
+      else ss="ScreenStream esta transmitindo (gasta CPU e bateria). Se ninguem esta vendo: cel otimizar --tudo"; fi
+    fi
+    r=$(sh_ "$cmd; am kill-all; sleep 2; grep MemAvailable /proc/meminfo #OTIMIZA-FAZ" 2>/dev/null | tr -d '\r')
+    m1=$(printf '%s\n' "$r" | sed -n 's/^MemAvailable: *\([0-9]*\).*/\1/p' | head -1)
+    echo "Caches limpos. Fechei $n apps parados em segundo plano (continuam recebendo avisos):${fech:- nenhum}"
+    [ -n "$paro" ] && echo "Parei de vez (utilitarios sem uso agora):$paro"
+    [ -n "$ss" ] && echo "$ss"
+    if [ -n "$m0" ] && [ -n "$m1" ]; then echo "RAM livre: antes $((m0 / 1024)) MB, depois $((m1 / 1024)) MB ($(( (m1 - m0) / 1024 )) MB)."; fi
+    echo "Ficam sempre: telefone, SMS, teclado, tela inicial, relogio, papel, Termux, Tailscale, KDE Connect, EnforceDoze e o que estiver aberto ou gravando." ;;
   telas) echo "Telas que o cel abre:"; for t in $TELAS; do printf '  %s\n' "${t%%:*}"; done ;;
   abrir)
     alvo="${2:-}"
@@ -612,5 +732,5 @@ case "${1:-status}" in
     esac
     precisa; sh_ "input keyevent $k"; echo "Tecla ${2} enviada." ;;
   sh) shift; [ $# -gt 0 ] || { echo "Use: cel sh \"comando\""; exit 2; }; precisa; sh_ "$*" ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

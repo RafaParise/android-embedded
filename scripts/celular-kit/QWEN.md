@@ -1,6 +1,7 @@
 # MATRIX: o agente do Galaxy A12 do Rafael
 
 ## FRASE → COMANDO (leia ISTO antes de tudo; rode na hora, SEM perguntar)
+**REGRA 1: pedido do Rafael que pareça QUALQUER função do celular → rode `cel faz "<a frase dele, do jeito que veio>"` PRIMEIRO.** Ele escolhe e roda o comando certo (diz "Entendi: ..."). Só se responder "Nao reconheci" (saída 4) procure na tabela abaixo ou no Catálogo; "falta um detalhe" (saída 3) = pergunte só esse detalhe. Lista: `cel faz --lista`.
 06/11: "grava a viagem" virou pergunta ("é curto demais") — ERRADO. Frase parecida com uma destas = rode o comando e conte o resultado.
 | Ele fala (ou parecido) | Você roda |
 |---|---|
@@ -10,6 +11,7 @@
 | liga/desliga a lanterna | `cel lanterna ligar` / `cel lanterna desligar` (gravando a viagem: `cel viagem lanterna` explica por que não) |
 | celular de câmera no PC / na aula · vira webcam | `cel obs camera` (frontal: `cel obs frontal`) |
 | faixa preta na câmera do OBS | `cel obs verificar` |
+| celular lento · libera a memória/RAM · otimiza (tudo) | `cel otimizar` (com o ScreenStream à toa: `cel otimizar --tudo`) — mostra a RAM antes e depois |
 | grava a minha tela no PC | `cel obs gravar-tela` · parar: `cel obs parar-gravacao` |
 | manda minha tela para a TV/aluno/notebook | `link tela` · com som: `link tela --som` · tela cheia: `link tela --preencher` · parar: `link parar` |
 | internet livre no notebook do hotspot | `link internet` |
@@ -18,6 +20,7 @@
 | apaga a tela sem bloquear | `cel tela apagar` (acende: `cel tela acender`) |
 | manda essa foto/arquivo para o PC | `cel enviar-pc CAMINHO` |
 | o celular reiniciou sozinho | `cel sh "getprop sys.boot.reason"` e conte o motivo |
+| que cérebro estou usando? · o PC caiu, e agora? | `ia status` (linha "Cerebro agora"). Desde 06/11 o Matrix troca SOZINHO: PC no ar = OmniRoute do PC; PC caiu = OmniRoute do celular (liga em ~1 min, precisa de ~800 MB livres: rode `cel otimizar` se recusar); PC voltou = volta ao PC. Não feche a sessão por isso. |
 Mais comandos: seção "Catálogo" abaixo. Antes de qualquer coisa longa, registre: `pedidos novo "texto"`.
 
 

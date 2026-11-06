@@ -207,6 +207,7 @@ class Ambiente:
             "IA_MONTAGENS": str(self.montagens),
             "IA_MEMINFO": str(self.meminfo),
             "IA_ESPERA": "0",
+            "IA_CHAVEADOR": "0",   # estes testes simulam a ponte fixa (socat); o chaveador tem testes proprios (test_chaveador_ia.py)
             "FAKE_LOG": str(self.log),
             "FAKE_MUNDO": str(self.mundo),
             "FAKE_ESTADO": str(self.estado),

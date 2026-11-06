@@ -232,6 +232,9 @@ mkdir -p ~/bin && cat > ~/bin/ia <<'FIM_DO_IA'
 #                    ATENCAO: o texto vai a um provedor externo (Groq): NUNCA mande nome, nota ou dado de aluno, nem senha ou chave
 #   ia status        so mostra o que esta ao alcance (nao abre nada)   |   ia parar   desliga o que o ia ligou (recusa se ha Qwen aberto; --forca obriga)
 # Reserva (PC fora do ar): se o OmniRoute do proprio celular estiver instalado e pronto (arquivo ~/.omniroute/pronto), o ia o liga sozinho em 127.0.0.1:20129 (~1 min, ~400 MB de RAM) e o desliga ao sair; sem o arquivo "pronto" ele nunca liga.
+# Troca automatica (06/11): com a reserva pronta, o Qwen fala com o CHAVEADOR em 127.0.0.1:20128: cada pedido vai ao OmniRoute do PC se ele
+#   responder e, se o PC cair NO MEIO da conversa, ao do celular (liga sozinho); quando o PC volta, volta a ele e desliga a reserva parada (5 min).
+#   O Matrix nao fecha. IA_CHAVEADOR=0 volta a ponte fixa (socat). Estado: ia status (linha "Cerebro agora").
 # Depois do modo pode vir a pasta:  ia codigo "/storage/1A2B-3C4D/Projetos/Android Embeeded"
 # Sem pasta: usa a pasta atual (se nao for a inicial do Termux) ou a pasta do projeto no cartao SD.
 # O que o ia liga, ele desliga ao sair (IA_MANTER=1 deixa ligado). Variaveis: IA_PC_IP, IA_PROJETO, IA_MODELO_LOCAL, IA_QWEN_MODELO, IA_CONECTA (segundos para conectar ao PC; padrao 8), IA_GW_PORTA e IA_GW_MB (reserva: porta e limite de memoria do OmniRoute do celular).
@@ -327,12 +330,244 @@ gw_desliga() { # desliga so a reserva (servidor e ponte dela) anotada em $RUN/pi
   local p n; [ -s "$RUN/pids" ] || return 0
   while read -r p n; do case "$n" in omniroute|"TCP:127.0.0.1:$GW_PORTA") mata "$p" "$n" ;; esac; done < "$RUN/pids"
 }
+SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
+usa_chaveador() { [ "${IA_CHAVEADOR:-1}" != 0 ] && command -v python3 >/dev/null 2>&1 && gw_pronto; }
+chaveador_py() { cat <<'CHAVEADOR_FIM'
+# chaveador do Matrix (06/11): o Qwen fala sempre com 127.0.0.1:20128; cada pedido vai ao OmniRoute do PC
+# (pela Tailscale) se ele responder, senao ao OmniRoute do proprio celular (liga sozinho se preciso), trocando a
+# chave pela local. Testa o PC a cada CH_INTERVALO s e volta a ele quando volta; desliga a reserva ociosa.
+# So escuta em 127.0.0.1; nunca grava chave em log.
+import asyncio, json, os, shlex, signal, subprocess, sys, time
+
+PC = os.environ.get("CH_PC", "100.64.0.1:20128")
+LOC = os.environ.get("CH_LOCAL", "127.0.0.1:20129")
+PORTA = int(os.environ.get("CH_PORTA", "20128"))
+CHAVE_ARQ = os.environ.get("CH_CHAVE_LOCAL", "")
+LIGA = os.environ.get("CH_LIGA", "")
+DESLIGA = os.environ.get("CH_DESLIGA", "")
+ESTADO = os.environ.get("CH_ESTADO", "")
+AVISO = os.environ.get("CH_AVISO", "")
+INTERVALO = float(os.environ.get("CH_INTERVALO", "20"))
+CONECTA = float(os.environ.get("CH_CONECTA", "4"))
+OCIOSO = float(os.environ.get("CH_OCIOSO", "300"))
+ESPERA = float(os.environ.get("CH_ESPERA_LOCAL", "150"))
+
+
+class E:
+    pc = os.environ.get("CH_INICIO", "pc") == "pc"
+    uso_local = 0.0
+    ligou = False
+    trava = None
+    via = None
+
+
+def hp(s):
+    h, p = s.rsplit(":", 1)
+    return h, int(p)
+
+
+def anota(via):
+    if via == E.via:
+        return
+    antes, E.via = E.via, via
+    if ESTADO:
+        try:
+            with open(ESTADO, "w") as f:
+                f.write("%s %d\n" % (via, int(time.time())))
+        except OSError:
+            pass
+    if antes is not None and AVISO:
+        msg = ("PC de volta: o Matrix usa o OmniRoute do PC" if via == "pc"
+               else "PC fora: o Matrix seguiu com o OmniRoute do celular")
+        try:
+            subprocess.Popen(shlex.split(AVISO) + [msg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+    print("cerebro:", via, flush=True)
+
+
+async def abre(alvo, t):
+    return await asyncio.wait_for(asyncio.open_connection(*hp(alvo)), t)
+
+
+async def responde(alvo, t):
+    try:
+        r, w = await abre(alvo, t)
+        w.close()
+        return True
+    except Exception:
+        return False
+
+
+async def roda(cmd):
+    if not cmd:
+        return 1
+    try:
+        p = await asyncio.create_subprocess_exec(*shlex.split(cmd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return 1
+    return await p.wait()
+
+
+async def garante_local():
+    if await responde(LOC, 1.5):
+        return True
+    if not LIGA:
+        return False
+    if E.trava is None:
+        E.trava = asyncio.Lock()
+    async with E.trava:
+        if await responde(LOC, 1.5):
+            return True
+        print("ligando a reserva do celular", flush=True)
+        if await roda(LIGA) != 0:   # recusou (memoria) ou nao subiu a tempo: so mais uma olhada, sem esperar
+            await asyncio.sleep(2)
+            E.ligou = await responde(LOC, 1.5)
+            return E.ligou
+        fim = time.time() + ESPERA
+        while time.time() < fim:
+            if await responde(LOC, 1.5):
+                E.ligou = True
+                return True
+            await asyncio.sleep(1)
+    return False
+
+
+def chave_local():
+    try:
+        with open(CHAVE_ARQ) as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
+
+
+def reescreve(cab, destino):
+    linhas = cab.split(b"\r\n")
+    saida = [linhas[0]]
+    alvo = LOC if destino == "local" else PC
+    for l in linhas[1:]:
+        if not l:
+            continue
+        nome = l.split(b":", 1)[0].strip().lower()
+        if nome in (b"connection", b"keep-alive", b"proxy-connection", b"host"):
+            continue
+        if nome == b"authorization" and destino == "local":
+            l = b"Authorization: Bearer " + chave_local().encode()
+        saida.append(l)
+    saida.append(b"Host: " + alvo.encode())
+    saida.append(b"Connection: close")   # um pedido por conexao: o proximo pode ir a outro OmniRoute
+    return b"\r\n".join(saida) + b"\r\n\r\n"
+
+
+async def cano(r, w):
+    try:
+        while True:
+            d = await r.read(65536)
+            if not d:
+                break
+            w.write(d)
+            await w.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            w.close()
+        except Exception:
+            pass
+
+
+async def atende(cr, cw):
+    try:
+        cab = await asyncio.wait_for(cr.readuntil(b"\r\n\r\n"), 120)
+    except Exception:
+        cw.close()
+        return
+    r = w = None
+    destino = None
+    if E.pc:
+        try:
+            r, w = await abre(PC, CONECTA)
+            destino = "pc"
+        except Exception:
+            E.pc = False
+    if destino is None and await garante_local():
+        try:
+            r, w = await abre(LOC, 5)
+            destino = "local"
+            E.uso_local = time.time()
+        except Exception:
+            pass
+    if destino is None:
+        corpo = json.dumps({"error": {"message": "chaveador do Matrix: sem OmniRoute: o PC nao respondeu e o do celular nao ligou (memoria livre?). Veja: ia status"}}).encode()
+        cw.write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(corpo) + corpo)
+        try:
+            await cw.drain()
+        except Exception:
+            pass
+        cw.close()
+        return
+    anota(destino)
+    w.write(reescreve(cab, destino))
+    await asyncio.gather(cano(cr, w), cano(r, cw), return_exceptions=True)
+
+
+async def vigia():
+    while True:
+        ok = await responde(PC, CONECTA)
+        E.pc = ok
+        if ok:
+            if E.via == "local":
+                anota("pc")
+            if E.ligou and time.time() - E.uso_local > OCIOSO:
+                await roda(DESLIGA)   # PC de volta e a reserva parada: devolve a memoria
+                E.ligou = False
+        elif LIGA and not await responde(LOC, 1.5):
+            asyncio.ensure_future(garante_local())   # PC caiu: ja liga a reserva, antes do proximo pedido
+        await asyncio.sleep(INTERVALO)
+
+
+async def principal():
+    srv = await asyncio.start_server(atende, "127.0.0.1", PORTA)
+    anota("pc" if E.pc else "local")
+    laco = asyncio.get_running_loop()
+    parar = laco.create_future()
+    for s in (signal.SIGTERM, signal.SIGINT):
+        laco.add_signal_handler(s, lambda: parar.done() or parar.set_result(None))
+    asyncio.ensure_future(vigia())
+    await parar
+    srv.close()
+    if E.ligou:
+        await roda(DESLIGA)   # desliga so a reserva que ELE ligou
+
+
+try:
+    asyncio.run(principal())
+except OSError as e:
+    print("nao abri a porta:", e, flush=True)
+    os._exit(1)
+os._exit(0)   # sem esperar conexoes ou tarefas penduradas
+CHAVEADOR_FIM
+}
+chaveador_liga() { # $1 = pc|local (por onde comeca). Escuta so em 127.0.0.1:20128; o que ele ligar da reserva, ele desliga
+  chaveador_py > "$RUN/chaveador.py" || return 1
+  local av=""; command -v termux-notification >/dev/null 2>&1 && av="termux-notification --id matrix-cerebro --title Matrix --content"
+  CH_PC="$PC_IP:20128" CH_LOCAL="127.0.0.1:$GW_PORTA" CH_PORTA=20128 CH_CHAVE_LOCAL="$GW_DADOS/cliente-local.key" \
+  CH_LIGA="bash '$SELF' reserva-ligar" CH_DESLIGA="bash '$SELF' reserva-desligar" CH_ESTADO="$RUN/cerebro" CH_INICIO="$1" \
+  CH_CONECTA="$CONECTA" CH_AVISO="$av" python3 "$RUN/chaveador.py" >"$RUN/chaveador.log" 2>&1 &
+  anota $! chaveador.py
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do grep -q . "$RUN/cerebro" 2>/dev/null && return 0; sleep 0.3; done
+  return 0
+}
 garante_gateway() { # PC fora: usa o OmniRoute do celular (so se pronto), com a ponte 20128 -> 127.0.0.1:$GW_PORTA para o Qwen nao mudar de configuracao
   gw_pronto || return 1
   local k pc_chave="$CHAVE"; k=$(head -1 "$GW_DADOS/cliente-local.key" 2>/dev/null)
   [ -n "$k" ] || return 1
   gw_liga || return 1
   gw_aquece "$k"
+  if [ -n "$pc_chave" ] && usa_chaveador; then
+    rm -f "$RUN/cerebro"; chaveador_liga local
+    nuvem_em 127.0.0.1:20128 && { VIA="OmniRoute do celular (o PC nao respondeu; volta ao PC sozinho quando ele voltar)"; return 0; }
+  fi
   CHAVE="$k"
   nuvem_em 127.0.0.1:20128 || ponte 20128 "$GW_PORTA" 127.0.0.1 "TCP:127.0.0.1:$GW_PORTA"
   nuvem_em 127.0.0.1:20128 && { VIA="OmniRoute do celular (o PC nao respondeu)"; return 0; }
@@ -342,6 +577,10 @@ garante_nuvem() {
   nuvem_em 127.0.0.1:20128 && { VIA="ponte local"; return 0; }
   if nuvem_em "$PC_IP:20128"; then
     gw_desliga   # o PC voltou: desliga a reserva que tenha ficado ligada (IA_MANTER ou queda) antes de abrir a ponte do PC
+    if usa_chaveador; then
+      rm -f "$RUN/cerebro"; chaveador_liga pc
+      nuvem_em 127.0.0.1:20128 && { VIA="Tailscale; se o PC cair, segue no OmniRoute do celular sem fechar"; return 0; }
+    fi
     ponte 20128 20128 && nuvem_em 127.0.0.1:20128 && { VIA="Tailscale"; return 0; }
     return 1
   fi
@@ -411,6 +650,7 @@ status() {
   pega_chave; echo "== O que esta ao alcance agora =="
   if [ -z "$CHAVE" ]; then nao "Nuvem (OmniRoute): sem a chave em ~/.qwen/.env"
   elif nuvem_em 127.0.0.1:20128; then ok "Nuvem (OmniRoute): pronta (ponte local)"
+    if [ -s "$RUN/cerebro" ]; then case "$(cut -d' ' -f1 "$RUN/cerebro")" in pc) ok "Cerebro agora: OmniRoute do PC (troca sozinho para o do celular se o PC cair)" ;; *) ok "Cerebro agora: OmniRoute do CELULAR (volta ao PC sozinho quando ele voltar)" ;; esac; fi
   elif nuvem_em "$PC_IP:20128"; then ok "Nuvem (OmniRoute): pronta (pela Tailscale)"
   else nao "Nuvem (OmniRoute): fora - PC desligado ou Tailscale desligada no PC/celular"; fi
   if [ -f "$GW_DIR/bin/omniroute.mjs" ]; then
@@ -537,6 +777,8 @@ sys.exit(1)'
 MODO="${1:-auto}"; PASTA_ARG=""
 case "$MODO" in
   qwen) shift; qwen27 "$@"; exit $? ;;
+  reserva-ligar) gw_pronto || exit 1; gw_liga || exit 1; gw_aquece "$(head -1 "$GW_DADOS/cliente-local.key" 2>/dev/null)"; exit 0 ;;   # (interno) o chaveador pede
+  reserva-desligar) gw_desliga; exit 0 ;;   # (interno) o chaveador pede quando o PC volta e a reserva fica parada
   auto|codigo|auditoria|rapido|pc|local|tudo|chat|status|parar|ajuda|-h|--help) shift 2>/dev/null ;;
   nuvem) MODO=codigo; shift ;;
   *) MODO=auto ;;   # nao e modo: pasta, pedido ("qwen arrume minhas fotos") ou opcao do Qwen; decidido logo abaixo
@@ -634,6 +876,9 @@ echo "(dentro dele: /help ajuda, Esc interrompe, /quit sai)"
 # IA_PERGUNTAR=1 volta a perguntar so nesta vez.
 MODO_QWEN=()
 [ -n "${IA_PERGUNTAR:-}" ] && MODO_QWEN=(--approval-mode default)
+# Um processo so (06/11): sem isso o Qwen abre um 2o node "supervisor" (~30 MB); no Linux o gc ja vem ligado no proprio processo
+# (cli-entry.js da 0.26.5, conferido no aparelho). IA_RELANCAR=1 volta ao jeito antigo.
+[ "${IA_RELANCAR:-0}" = 1 ] || export QWEN_CODE_NO_RELAUNCH=true
 if [ -n "$PEDIDO" ]; then qwen --model "$ID" "${MODO_QWEN[@]}" "${MCP_OFF[@]}" -i "$PEDIDO" "$@"; else qwen --model "$ID" "${MODO_QWEN[@]}" "${MCP_OFF[@]}" "$@"; fi
 exit $?
 FIM_DO_IA

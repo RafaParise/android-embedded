@@ -17,6 +17,8 @@ case "$1" in
   pair) [ "$3" = 123456 ] && { touch "$FALSO_DIR/depuracao"; echo "Successfully paired"; exit 0; }; echo "Failed"; exit 1 ;;
   -s) shift 2; [ "$1" = shell ] || exit 1; shift; echo "SHELL $*" >> "$FALSO_LOG"
       case "$*" in
+        *"#OTIMIZA-LER"*) cat "$FALSO_DIR/otimiza.txt" 2>/dev/null ;;
+        *"#OTIMIZA-FAZ"*) echo "MemAvailable:    1536000 kB" ;;
         *"pm list packages"*) printf 'package:com.exemplo.um\npackage:com.samsung.android.smartmirroring\n' ;;
         *"settings list"*) echo "bluetooth_on=1" ;;
         *"settings get global mobile_data"*) [ -f "$FALSO_DIR/sem_dados" ] && echo 0 || echo 1 ;;
@@ -548,3 +550,110 @@ def test_lanterna_ocupada_ensina_a_do_fadcam(cel):
     (cel.dir / "bin" / "termux-torch").chmod(0o755)
     rc, s = cel.roda("lanterna", "ligar")
     assert rc == 1 and "lanterna segura" in s
+
+
+OTIMIZA = """M=1024000
+K=com.samsung.android.honeyboard/.service.HoneyBoardService
+C=com.google.android.gm
+C=com.santander.app
+C=com.google.android.gm
+C=com.kgurgul.cpuinfo
+C=com.fadcam
+C=com.whatsapp
+C=com.samsung.android.honeyboard
+C=com.google.android.gms.persistent
+C=com.android.phone
+C=com.android.systemui
+C=android
+C=x;reboot
+"""
+
+
+def test_otimizar_fecha_so_os_parados_poupa_os_essenciais_e_mostra_a_ram(cel):
+    _conectado(cel)
+    (cel.dir / "otimiza.txt").write_text(OTIMIZA)
+    rc, s = cel.roda("otimizar")
+    reg = cel.registro()
+    faz = [l for l in reg.splitlines() if "#OTIMIZA-FAZ" in l][0]
+    assert rc == 0 and "am kill com.google.android.gm;" in faz and "am kill com.santander.app" in faz and "am kill com.whatsapp" in faz
+    assert faz.count("am kill com.google.android.gm;") == 1   # sem repetir
+    assert "am force-stop com.kgurgul.cpuinfo" in faz and "am force-stop com.fadcam" in faz
+    for nunca in ("honeyboard", "gms", "com.android.", "kill android", "reboot"):
+        assert nunca not in faz.replace("pm trim-caches", ""), nunca
+    assert "force-stop com.whatsapp" not in faz and "force-stop com.google.android.gm" not in faz   # force-stop cortaria os avisos
+    assert "Fechei 3 apps" in s and "RAM livre: antes 1000 MB, depois 1500 MB (500 MB)" in s and "screenstream" not in faz
+
+
+def test_otimizar_avisa_do_screenstream_e_so_encerra_com_tudo(cel):
+    _conectado(cel)
+    (cel.dir / "otimiza.txt").write_text("M=1024000\nSS=1\n")
+    rc, s = cel.roda("otimizar")
+    assert rc == 0 and "otimizar --tudo" in s and "force-stop info.dvkr.screenstream" not in cel.registro()
+    (cel.dir / "bin" / "pgrep").write_text("#!/bin/bash\nexit 1\n")   # nenhum link no ar
+    (cel.dir / "bin" / "pgrep").chmod(0o755)
+    rc, s = cel.roda("otimizar", "--tudo")
+    assert "ENCERRADO" in s and "am force-stop info.dvkr.screenstream" in cel.registro()
+
+
+def test_otimizar_com_tudo_nao_encerra_o_screenstream_se_o_link_esta_no_ar(cel):
+    _conectado(cel)
+    (cel.dir / "otimiza.txt").write_text("M=1024000\nSS=1\n")
+    (cel.dir / "bin" / "pgrep").write_text("#!/bin/bash\nexit 0\n")
+    (cel.dir / "bin" / "pgrep").chmod(0o755)
+    rc, s = cel.roda("otimizar", "--tudo")
+    assert "FICOU" in s and "force-stop info.dvkr.screenstream" not in cel.registro()
+
+
+FRASES = [
+    ("Grava a viagem", "cel viagem iniciar"),
+    ("matrix, grava o caminho enquanto uso o mapa por favor", "cel viagem iniciar"),
+    ("liga a câmera do carro", "cel viagem iniciar"),
+    ("PARA A GRAVAÇÃO", "cel viagem parar"),
+    ("terminei a viagem", "cel viagem parar"),
+    ("tá gravando?", "cel viagem status"),
+    ("acende a lanterna", "cel lanterna ligar"),
+    ("apaga a lanterna", "cel lanterna desligar"),
+    ("o celular está lento, libera a memória", "cel otimizar"),
+    ("otimiza tudo no máximo", "cel otimizar --tudo"),
+    ("limpa o cache", "cel limpar"),
+    ("faixa preta na câmera do OBS", "cel obs verificar"),
+    ("vira câmera do PC para a aula", "cel obs camera"),
+    ("webcam com a câmera frontal", "cel obs frontal"),
+    ("grava a minha tela", "cel obs gravar-tela"),
+    ("manda a tela para a TV", "link tela"),
+    ("manda a tela para o notebook com som", "link tela --som"),
+    ("mostra a tela na TV em tela cheia", "link tela --preencher"),
+    ("para de transmitir", "link parar"),
+    ("internet livre para o notebook do hotspot", "link internet"),
+    ("a VPN está ligada?", "saida status"),
+    ("desliga a VPN", "saida desligar"),
+    ("desliga o Wi-Fi", "cel wifi desligar"),
+    ("liga o bluetooth", "cel bluetooth ligar"),
+    ("apaga a tela", "cel tela apagar"),
+    ("a internet caiu", "cel internet reiniciar"),
+    ("como está a bateria", "cel status"),
+]
+
+
+@pytest.mark.parametrize("frase,cmd", FRASES)
+def test_faz_entende_a_frase_do_jeito_dele(cel, frase, cmd):
+    # so a decisao: o cel faz roda o comando de verdade, aqui o "Entendi:" mostra qual foi
+    rc, s = cel.roda("faz", "--mostra", frase)
+    assert f"Entendi: {cmd}\n" in s, (frase, s[:300])
+
+
+def test_faz_pede_o_detalhe_que_falta_e_nao_reconhece_o_que_nao_sabe(cel):
+    rc, s = cel.roda("faz", "manda essa foto para o PC")
+    assert rc == 3 and "cel enviar-pc CAMINHO" in s
+    rc, s = cel.roda("faz", "faz um bolo de cenoura")
+    assert rc == 4 and "cel faz --lista" in s and "Entendi" not in s
+
+
+def test_faz_nunca_executa_texto_do_usuario(cel):
+    rc, s = cel.roda("faz", "--mostra", "grava a viagem; reboot $(reboot) `reboot`")
+    assert "Entendi: cel viagem iniciar" in s and "reboot" not in cel.registro()
+
+
+def test_faz_lista_mostra_as_frases(cel):
+    rc, s = cel.roda("faz", "--lista")
+    assert rc == 0 and "grava a viagem" in s and "link internet" in s

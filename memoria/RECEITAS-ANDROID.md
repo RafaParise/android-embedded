@@ -78,6 +78,30 @@ O FadCam (F-Droid, GPL-3.0, 3.0.1, hash conferido com o índice assinado) grava 
   driver de tela preso numa trava [Provável: registro do kernel]. Sem root não há conserto; diminui o risco: memória folgada antes de estressar
   (fechar o Organic Maps, 572 MB, e o Matrix), não trocar de Wi-Fi com hotspot + ScreenStream ligados.
 
+## Matrix em potência máxima: frase → ação, troca de cérebro e RAM [Provado no A12 em 06/11 ~16:30–17:30]
+- **Frase do jeito dele → comando:** `cel faz "frase"` (normaliza acento e caixa e roda o comando certo; `--lista` mostra as frases;
+  `--mostra` só diz o que faria). "falta um detalhe" (saída 3) = perguntar só esse detalhe; "Nao reconheci" (saída 4) = procurar no
+  Catálogo do QWEN.md. É a REGRA 1 no topo do QWEN.md: o Matrix roda `cel faz` antes de tudo. Conferido no aparelho: "libera a memoria
+  do celular" → `cel otimizar`; "grava a viagem" → `cel viagem iniciar`. 27 frases nos testes.
+- **Cérebro que troca sozinho (PC ↔ celular):** com a reserva pronta, o `ia`/`matrix` põe o CHAVEADOR em 127.0.0.1:20128 (no lugar da
+  ponte fixa). Cada pedido vai ao OmniRoute do PC se ele responder; se o PC cair NO MEIO da conversa, vai ao OmniRoute do celular
+  (o chaveador o liga sozinho, troca a chave pela local, avisa na barra "PC fora: o Matrix seguiu com o OmniRoute do celular"); quando o
+  PC volta, volta a ele e desliga a reserva parada há 5 min. O Matrix não fecha. Ver qual está valendo: `ia status` (linha "Cerebro agora").
+  Medido no A12: PC no ar = rota ao PC; "PC fora" (porta fechada) = 1º pedido respondido pela reserva em 77 s (a reserva sobe em ~70 s,
+  precisa de ~800 MB livres: se recusar, `cel otimizar`); ao fechar, chaveador e reserva saem sozinhos. Desligar a troca: `IA_CHAVEADOR=0 ia`.
+  Por que a reserva não fica ligada SEMPRE: custa ~400 MB de RAM o tempo todo (de 3,8 GB), contra o pedido de RAM livre; ela liga sozinha
+  quando precisa e a vigia do chaveador a liga assim que o PC some, antes do próximo pedido.
+- **Um processo só:** o Matrix abria dois `node` (um "supervisor" de ~30 MB); desde 06/11 `QWEN_CODE_NO_RELAUNCH=true` no `ia`
+  (no Linux o Qwen 0.26.5 já liga o `gc` no próprio processo; conferido no `cli-entry.js`). Provado: um processo. `IA_RELANCAR=1` volta.
+- **Liberar RAM e CPU:** `cel otimizar` (fecha com `am kill` os apps PARADOS em cache, que continuam recebendo avisos; `force-stop` só nos
+  utilitários parados (CPU Info, Binary Eye, LocalSend) e no FadCam parado; nada visível, nada com serviço, nenhum `com.android.*`, gms,
+  teclado, telefone, SMS, relógio, tela inicial, papel, Termux, Tailscale, KDE Connect, EnforceDoze). Mostra a RAM antes e depois.
+  Medido: 1190 → 1584 MB (+393 MB, 17 apps). `cel otimizar --tudo` encerra também o ScreenStream transmitindo à toa (se nenhum `link` estiver no ar).
+- **O que fica rodando sempre e por quê (revisado em 06/11):** vigia da tela (`app_process Tela`, 24 MB: o gesto de apagar e o Wi-Fi turbo),
+  guarda da `saida` (23 s de CPU em 8 h; espaçar os testes atrasaria a volta da internet quando o PC cai, hoje 33 s: mantido), `guarda`
+  (inotifywait, só acorda com arquivo novo), Termux:Boot. Nenhum deles vale trocar: o custo medido é quase zero.
+- **Papel de parede:** sem faixa preta em pé e deitado, e deitado ele fica FIXO ao arrastar entre as páginas (app `br.embeeded.papel`, 06/11).
+
 ## Regra de ouro para operar qualquer app (o "olho e dedo")
 1. `cel abrir-app PACOTE` (ache o pacote: `cel apps texto`), ou `cel abrir TELA` para Configurações.
 2. `cel ler` lista o que há na tela, numerado, com o centro de cada item. `cel ler TEXTO` filtra.
