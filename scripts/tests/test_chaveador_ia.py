@@ -88,6 +88,8 @@ class Mundo:
         self.prog.write_text(codigo_do_chaveador())
         self.chave = base / "cliente-local.key"
         self.chave.write_text("chave-local\n")
+        self.env_qwen = base / ".env"
+        self.env_qwen.write_text("PONTE_PC_TOKEN=outro\nOMNIROUTE_API_KEY=chave-do-pc\n")
         self.pc_porta, self.loc_porta, self.porta = porta_livre(), porta_livre(), porta_livre()
         self.pc = None
         self.loc = None
@@ -118,7 +120,7 @@ class Mundo:
         pid = self.base / "reserva.pid"
         cmd_liga = f"/bin/sh -c '{sys.executable} {self.srv} celular {self.loc_porta} {self.log} & echo $! > {pid}; echo ligou >> {self.base}/marcas; sleep 0.8'"
         env = dict(os.environ, CH_PC=f"127.0.0.1:{self.pc_porta}", CH_LOCAL=f"127.0.0.1:{self.loc_porta}", CH_PORTA=str(self.porta),
-                   CH_CHAVE_LOCAL=str(self.chave), CH_LIGA=cmd_liga if liga else "",
+                   CH_CHAVE_LOCAL=str(self.chave), CH_CHAVE_PC=str(self.env_qwen), CH_LIGA=cmd_liga if liga else "",
                    CH_DESLIGA=f"/bin/sh -c 'echo desligou >> {self.base}/marcas; kill $(cat {pid})'",
                    CH_ESTADO=str(self.base / "cerebro"), CH_INICIO=inicio, CH_INTERVALO="0.3", CH_CONECTA="0.5",
                    PATH="/usr/bin:/bin", CH_AVISO=f"/bin/sh -c 'echo \"$0\" >> {self.base}/avisos'", CH_ESPERA_LOCAL="10")
@@ -267,3 +269,21 @@ def test_o_ia_so_usa_o_chaveador_com_a_reserva_pronta_e_permite_desligar():
     t = IA.read_text(encoding="utf-8")
     assert 'usa_chaveador() { [ "${IA_CHAVEADOR:-1}" != 0 ] && command -v python3 >/dev/null 2>&1 && gw_pronto; }' in t
     assert "export QWEN_CODE_NO_RELAUNCH=true" in t   # um node so, sem o supervisor
+
+
+@pytest.mark.parametrize("chave", ["", "chave-errada", "chave-do-pc-e-mais", "chave-local"])
+def test_sem_a_chave_do_matrix_recusa_401_sem_repassar_nem_ligar_a_reserva(mundo, chave):
+    # outro app do celular abre a 20128: nao pode usar a reserva (nem a chave local injetada) sem saber a chave do Matrix
+    mundo.liga_pc()
+    mundo.chaveador(inicio="local")
+    cab, corpo = pede(mundo.porta, chave=chave)
+    assert " 401 " in cab.splitlines()[0] and "chave invalida" in corpo.decode()
+    assert mundo.pedidos() == [] and mundo.marcas() == []
+
+
+def test_sem_o_arquivo_da_chave_recusa_tudo(mundo):
+    mundo.liga_pc()
+    mundo.env_qwen.unlink()
+    mundo.chaveador()
+    cab, _ = pede(mundo.porta)
+    assert " 401 " in cab.splitlines()[0] and mundo.pedidos() == []

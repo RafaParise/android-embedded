@@ -89,6 +89,8 @@ O FadCam (F-Droid, GPL-3.0, 3.0.1, hash conferido com o índice assinado) grava 
   PC volta, volta a ele e desliga a reserva parada há 5 min. O Matrix não fecha. Ver qual está valendo: `ia status` (linha "Cerebro agora").
   Medido no A12: PC no ar = rota ao PC; "PC fora" (porta fechada) = 1º pedido respondido pela reserva em 77 s (a reserva sobe em ~70 s,
   precisa de ~800 MB livres: se recusar, `cel otimizar`); ao fechar, chaveador e reserva saem sozinhos. Desligar a troca: `IA_CHAVEADOR=0 ia`.
+  Segurança: o chaveador só atende quem manda a chave do Matrix (a do `~/.qwen/.env`, comparada em tempo constante); outro app do celular
+  que abra a 20128 recebe 401, sem repasse e sem ligar a reserva (provado no A12: certa 200, errada 401, sem chave 401).
   Por que a reserva não fica ligada SEMPRE: custa ~400 MB de RAM o tempo todo (de 3,8 GB), contra o pedido de RAM livre; ela liga sozinha
   quando precisa e a vigia do chaveador a liga assim que o PC some, antes do próximo pedido.
 - **Um processo só:** o Matrix abria dois `node` (um "supervisor" de ~30 MB); desde 06/11 `QWEN_CODE_NO_RELAUNCH=true` no `ia`

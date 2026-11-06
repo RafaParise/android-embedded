@@ -118,12 +118,13 @@ chaveador_py() { cat <<'CHAVEADOR_FIM'
 # (pela Tailscale) se ele responder, senao ao OmniRoute do proprio celular (liga sozinho se preciso), trocando a
 # chave pela local. Testa o PC a cada CH_INTERVALO s e volta a ele quando volta; desliga a reserva ociosa.
 # So escuta em 127.0.0.1; nunca grava chave em log.
-import asyncio, json, os, shlex, signal, subprocess, sys, time
+import asyncio, hmac, json, os, shlex, signal, subprocess, sys, time
 
 PC = os.environ.get("CH_PC", "100.64.0.1:20128")
 LOC = os.environ.get("CH_LOCAL", "127.0.0.1:20129")
 PORTA = int(os.environ.get("CH_PORTA", "20128"))
 CHAVE_ARQ = os.environ.get("CH_CHAVE_LOCAL", "")
+CHAVE_PC_ARQ = os.environ.get("CH_CHAVE_PC", "")   # ~/.qwen/.env: so quem tem a chave do Matrix passa (outro app do celular nao)
 LIGA = os.environ.get("CH_LIGA", "")
 DESLIGA = os.environ.get("CH_DESLIGA", "")
 ESTADO = os.environ.get("CH_ESTADO", "")
@@ -222,6 +223,32 @@ def chave_local():
         return ""
 
 
+def chave_pc():
+    try:
+        with open(CHAVE_PC_ARQ) as f:
+            for l in f:
+                if l.startswith("OMNIROUTE_API_KEY="):
+                    return l.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def autorizado(cab):
+    esperada = chave_pc()
+    if not esperada:
+        return False
+    for l in cab.split(b"\r\n")[1:]:
+        if l.split(b":", 1)[0].strip().lower() == b"authorization":
+            return hmac.compare_digest(l.split(b":", 1)[1].strip(), b"Bearer " + esperada.encode())
+    return False
+
+
+def recusa(cw, cod, msg):
+    corpo = json.dumps({"error": {"message": "chaveador do Matrix: " + msg}}).encode()
+    cw.write(b"HTTP/1.1 " + cod + b"\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(corpo) + corpo)
+
+
 def reescreve(cab, destino):
     linhas = cab.split(b"\r\n")
     saida = [linhas[0]]
@@ -263,6 +290,14 @@ async def atende(cr, cw):
     except Exception:
         cw.close()
         return
+    if not autorizado(cab):   # sem a chave do Matrix: nao repassa, nao liga a reserva, nao injeta a chave local
+        recusa(cw, b"401 Unauthorized", "chave invalida")
+        try:
+            await cw.drain()
+        except Exception:
+            pass
+        cw.close()
+        return
     r = w = None
     destino = None
     if E.pc:
@@ -279,8 +314,7 @@ async def atende(cr, cw):
         except Exception:
             pass
     if destino is None:
-        corpo = json.dumps({"error": {"message": "chaveador do Matrix: sem OmniRoute: o PC nao respondeu e o do celular nao ligou (memoria livre?). Veja: ia status"}}).encode()
-        cw.write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(corpo) + corpo)
+        recusa(cw, b"503 Service Unavailable", "sem OmniRoute: o PC nao respondeu e o do celular nao ligou (memoria livre?). Veja: ia status")
         try:
             await cw.drain()
         except Exception:
@@ -332,7 +366,7 @@ CHAVEADOR_FIM
 chaveador_liga() { # $1 = pc|local (por onde comeca). Escuta so em 127.0.0.1:20128; o que ele ligar da reserva, ele desliga
   chaveador_py > "$RUN/chaveador.py" || return 1
   local av=""; command -v termux-notification >/dev/null 2>&1 && av="termux-notification --id matrix-cerebro --title Matrix --content"
-  CH_PC="$PC_IP:20128" CH_LOCAL="127.0.0.1:$GW_PORTA" CH_PORTA=20128 CH_CHAVE_LOCAL="$GW_DADOS/cliente-local.key" \
+  CH_PC="$PC_IP:20128" CH_LOCAL="127.0.0.1:$GW_PORTA" CH_PORTA=20128 CH_CHAVE_LOCAL="$GW_DADOS/cliente-local.key" CH_CHAVE_PC="$HOME/.qwen/.env" \
   CH_LIGA="bash '$SELF' reserva-ligar" CH_DESLIGA="bash '$SELF' reserva-desligar" CH_ESTADO="$RUN/cerebro" CH_INICIO="$1" \
   CH_CONECTA="$CONECTA" CH_AVISO="$av" python3 "$RUN/chaveador.py" >"$RUN/chaveador.log" 2>&1 &
   anota $! chaveador.py
