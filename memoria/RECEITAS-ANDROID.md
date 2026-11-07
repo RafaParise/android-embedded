@@ -185,6 +185,15 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
 - Escola (06/11): SEDUC-MAQ (notebooks) e SEDUC-ALUNOS (celulares) não se enxergam; o notebook na SEDUC-MAQ não abre `http://10.x...:8080` do celular. Para mostrar a tela no notebook da escola: notebook no hotspot do celular e o endereço do hotspot, ou o link público do `link tela`.
 - ScreenStream pela Tailscale: `http://100.64.0.2:8080` (filtros VPN e Público ligados no app). KDE Connect acha o PC pelo IP da Tailscale.
 
+## Doze, compilação e bateria (06/11)
+- **Doze profundo mais cedo (ligado):**
+  - Com o celular parado, sem cabo e de tela apagada, entra em cerca de 20 min, em vez de cerca de 1 h.
+  - Conferir: `cel sh "device_config get device_idle inactive_to"`. O valor 600000 indica ligado.
+  - Desfazer: `device_config delete device_idle inactive_to` e `device_config delete device_idle idle_after_inactive_to`.
+  - Quem está na lista do Doze (Termux, Tailscale, SED, Relógio) não é afetado.
+- **Não sugerir `compile -m speed`:** medido em 06/11, deixa os apps de 15% a 55% mais lentos para abrir neste A12. O padrão é `speed-profile`.
+- **Saúde da bateria:** `saude.py` (no PC) mostra a estimativa da Samsung (ASOC, 86% em 06/11). Abaixo de 80% vira atenção.
+
 ## Interface do Rafael (05/11)
 - Tela inicial da Samsung em "Apenas a Tela inicial" (sem gaveta), 5 páginas (a 5ª vazia, para o papel rolante mostrar a imagem inteira); papel rolante com acessibilidade própria (não desligue). Nunca mude a ordem dos ícones.
 - Telefone da Samsung removido; o padrão é o Fossify Telefone (a emergência continua no app da Samsung).

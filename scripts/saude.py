@@ -96,7 +96,8 @@ def pior(a, b):
 def parse_bateria(texto):
     d = {}
     for rotulo, chave in (("level", "nivel"), ("status", "estado"), ("health", "saude"), ("temperature", "temp_dec"),
-                          ("voltage", "mv"), ("Charge counter", "carga_uah")):
+                          ("voltage", "mv"), ("Charge counter", "carga_uah"),
+                          ("mSavedBatteryAsoc", "asoc")):  # saude estimada pela propria Samsung, em % (06/11: 86)
         m = re.search(rf"^\s*{rotulo}: (-?\d+)\s*$", texto, re.M | re.I)
         if m:
             d[chave] = int(m.group(1))
@@ -265,6 +266,12 @@ def av_bateria(b):
         if pct < LIM_BAT_CAP_AL:
             nivel = pior(nivel, AL)
         elif pct < LIM_BAT_CAP_AT:
+            nivel = pior(nivel, AT)
+    if "asoc" in b:  # a conta acima usa o charge counter, que o medidor da Samsung escala; o ASOC e a saude que ela mesma calcula
+        partes.append(f"saude Samsung (ASOC) {b['asoc']}%")
+        if b["asoc"] < LIM_BAT_CAP_AL:
+            nivel = pior(nivel, AL)
+        elif b["asoc"] < LIM_BAT_CAP_AT:
             nivel = pior(nivel, AT)
     if temp >= LIM_BAT_TEMP_AL:
         nivel = pior(nivel, AL)

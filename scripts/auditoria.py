@@ -262,6 +262,9 @@ def ajustes():
         reg(s, "OK" if v == esperado else "AVISO", f"{k}", f"{v} (esperado {esperado})")
     v = sh("device_config get activity_manager max_phantom_processes")
     reg(s, "OK" if v == "2147483647" else "AVISO", "max_phantom_processes", v)
+    for k in ("inactive_to", "idle_after_inactive_to"):  # Doze profundo em ~10 min (06/11; ajustes-script.py reaplica)
+        v = sh(f"device_config get device_idle {k}")
+        reg(s, "OK" if v == "600000" else "AVISO", f"device_idle {k}", v)
     for pkg in ("com.android.vending", "com.microsoft.teams"):
         m = re.search(r"RUN_IN_BACKGROUND: (\w+)", sh(f"cmd appops get {pkg} RUN_IN_BACKGROUND"))
         reg(s, "INFO", f"{pkg} em segundo plano", m.group(1) if m else "padrao")

@@ -64,3 +64,37 @@ OK / ATENCAO / ALERTA por linha; saída 0 sem alerta, 1 com alerta, 2 sem aparel
 | Mortes (1 h) | serviço/último app morto por memória, ou ≥ 30 mortes por memória | app visível ou audível morto por memória |
 | Wi-Fi | sinal < −75 dBm | — |
 Só contam como falta de memória os motivos Chimera, ML_Kill e lmkd. "isolated not needed", "stop <pacote>" e "empty" são faxina normal: o app Vivo criou e recolheu um processo isolado por minuto (31 mortes entre 10:21 e 10:50 de hoje, adj 0, ou seja, com o app aberto [Provável]) e isso **não** é falta de RAM.
+
+## 5. Varredura dos projetos de Android modificado (06/11/2026 ~22:45)
+Pedido do Rafael: revisar hardware e software a fundo e trazer o melhor dos projetos de Android modificado.
+**Premissa:** quase tudo o que esses projetos ganham vem de root ou de bootloader desbloqueado (decidido NÃO fazer; desbloquear apaga o aparelho). Abaixo, o que se transfere por ADB, medido no A12.
+
+**Hardware lido hoje** [Certo: sonda só de leitura, 22:27]:
+- SoC MT6765V/CB (8 núcleos) e GPU PowerVR GE8320 (GLES 3.2).
+- zram de 4 GiB em lz4. O kernel também oferece zstd, mas trocar exige root.
+- Governador, frequência, vida útil do eMMC e swappiness não são legíveis sem root ("Permission denied").
+- Disco: escrita de 512 B em 1 ms; escrita recente de 13,5 MB/s; 14,0 GB livres (27%).
+- Térmica 0; PSI 0%; RAM disponível de 1,37 GB, com o Organic Maps aberto (625 MB).
+- **Bateria: a Samsung estima a saúde em 86%** (`mSavedBatteryAsoc` do `dumpsys battery`) [Provável: campo próprio da Samsung, sem documentação pública]. A conta do charge counter dá cerca de 100% porque o medidor escala esse contador. Desde 06/11 o `saude.py` mostra os dois e usa os limites 80/60 também no ASOC.
+- Proteção contra inchaço e limite de carga: não suportados (`SEC_FEATURE_PREVENT_SWELLING: false`, `SEC_FEATURE_BATTERY_LIFE_EXTENDER: false`).
+
+| Técnica (projeto de origem) | Neste A12 | Prova |
+|---|---|---|
+| ROM própria, GSI, kernel, governador, escalonador de E/S, LMK, swappiness, zram zstd (LineageOS, crDroid, FDE.AI, YAKT, Uperf, LKT) | fora: root/bootloader | decisão de 29/10 e 04/11 |
+| Debloat (UAD-ng, Canta, listas Samsung) | feito | `lote-pacotes.py`, `cruzar-uad.py` |
+| Restringir segundo plano (Brevent, Hail, Greenify, smart-restrict do Aatricks) | feito | appops, buckets, Doze em `ajustes-script.py` |
+| Limite de processos fantasma (comunidade do Termux) | feito | `max_phantom_processes` |
+| **Doze mais cedo (Naptime, ForceDoze, Aatricks "experimental")** | **APLICADO 06/11** | `device_config device_idle` com `inactive_to` e `idle_after_inactive_to` de 30 min para 10 min; conferido no `dumpsys deviceidle`; a auditoria confere e o `ajustes-script.py` reaplica. Quem está na lista do Doze (Termux, Tailscale, SED, Relógio, Agenda, Open Camera, Organic Maps) não muda. Desfazer: `device_config delete device_idle inactive_to` e `... idle_after_inactive_to` |
+| Compilar tudo em `speed` (módulos Dex2OAT) | **MEDIDO PIOR, desfeito** | abertura a frio de 3 a 4 medidas por app; `speed-profile` → `speed` → `speed-profile`. Mensagens 521 → 597 → 518 ms; Contatos 579 → 671 → 566; Firefox 725 → 1.133 → 737; Arquivos 768 → 879 → 766. Código AOT maior pesa no eMMC. O ARENA ficou igual nos dois modos (cerca de 720 ms) e segue em `speed` |
+| GMS fora da lista do Doze (Universal GMS Doze) | possível sem root, **não aplicado** | `dumpsys deviceidle sys-whitelist -com.google.android.gms` (volta com `+` ou `reset`). O próprio projeto ensina a consertar "mensagens que chegam atrasadas" e o FCM das notificações passa pelo GMS: risco ao WhatsApp e ao SED. Só se o Rafael pedir |
+| Modo de desempenho fixo (`cmd power set-fixed-performance-mode-enabled`) | rejeitado | trava o clock alto; esquenta, e o SDHMS fecha app visível no calor |
+| Buffers de log menores ou desligados (ROMs) | rejeitado | ganho de cerca de 7 MB (main 5 MiB, system 2 MiB); o `saude.py` lê as mortes (`am_kill`) do buffer de eventos |
+| Hibernação de apps sem uso (Android 12) | já ligada pelo sistema | `app_hibernation_enabled=true` |
+| Tela sempre ligada, levantar para acordar, gesto de pegar | já desligados | `aod_mode`, `lift_to_wake` e `motion_pick_up` = 0 |
+| Processamento aprimorado da Samsung | já ligado | `sem_enhanced_cpu_responsiveness=1` |
+| `device_idle_constants` em `settings global` (scripts antigos) | inerte no Android 12 | o `dumpsys` mostra outros valores. Fica como está: não é do projeto e não faz nada |
+
+Fontes:
+- [Provável] github.com/gloeyisk/universal-gms-doze, README;
+- [Provável] github.com/Aatricks/android-battery-optimization, README (perfis safe, experimental e Samsung);
+- [Palpite] para FDE.AI, YAKT e Dex2OAT: só changelogs e READMEs, sem ler o código dos módulos.

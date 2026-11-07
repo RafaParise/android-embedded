@@ -545,3 +545,17 @@ def test_main_online_mostra_firmware_e_apps_e_pede_so_leitura(importa_script, mo
     assert set(chamados) == set(mod.CMD.values())
     for cmd in chamados:
         assert SOMENTE_LEITURA.match(cmd), cmd
+
+
+def test_saude_samsung_asoc_aparece_e_usa_os_mesmos_limites(importa_script):
+    """06/11: o dumpsys battery da Samsung traz mSavedBatteryAsoc (86 no A12), que a conta do charge counter nao enxerga."""
+    mod = importa_script("saude.py")
+    assert mod.parse_bateria(BATERIA + "\n  mSavedBatteryAsoc: 86\n")["asoc"] == 86
+    assert "asoc" not in mod.parse_bateria(BATERIA)
+    nivel, texto = mod.av_bateria(_bat(asoc=86))
+    assert nivel == mod.OK and "saude Samsung (ASOC) 86%" in texto
+    assert mod.av_bateria(_bat(asoc=80))[0] == mod.OK
+    assert mod.av_bateria(_bat(asoc=79))[0] == mod.AT
+    assert mod.av_bateria(_bat(asoc=60))[0] == mod.AT
+    assert mod.av_bateria(_bat(asoc=59))[0] == mod.AL
+    assert "ASOC" not in mod.av_bateria(_bat())[1]

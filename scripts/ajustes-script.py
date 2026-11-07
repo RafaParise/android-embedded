@@ -58,7 +58,11 @@ APPOPS = [  # (pacote, operacao, modo)
 GRANTS = [("org.fossify.gallery", "android.permission.READ_EXTERNAL_STORAGE")]  # Galeria no lugar da Samsung: so le midias (sem localizacao das fotos)
 BUCKETS = [("com.whatsapp.w4b", "30")]  # 30 = FREQUENT
 WHITELIST = ["net.sourceforge.opencamera", "app.organicmaps", "org.fossify.calendar"]  # lista de Doze (script, Dashcam; agenda por pesquisa)
-DEVCFG = [("activity_manager", "max_phantom_processes", "2147483647")]  # Termux sobrevive em segundo plano (limite do Android 12)
+DEVCFG = [("activity_manager", "max_phantom_processes", "2147483647"),  # Termux sobrevive em segundo plano (limite do Android 12)
+          # Doze profundo ~40 min mais cedo com o celular parado, sem cabo e de tela apagada (tecnica do Naptime/ForceDoze, sem root;
+          # 06/11: padrao 30+30 min; quem esta na lista do Doze, como Termux, Tailscale, SED e Relogio, nao e afetado)
+          ("device_idle", "inactive_to", "600000"),
+          ("device_idle", "idle_after_inactive_to", "600000")]
 
 
 def sh(cmd, timeout=60, estrito=False):

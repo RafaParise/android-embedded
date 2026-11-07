@@ -31,6 +31,8 @@ EXATOS = {
     "df -h /data | tail -1": "/dev/x 50G 30G 20G 60% /data",
     "settings get global default_install_location": "1",
     "device_config get activity_manager max_phantom_processes": "2147483647",
+    "device_config get device_idle inactive_to": "600000",
+    "device_config get device_idle idle_after_inactive_to": "600000",
     "cmd appops get com.android.vending RUN_IN_BACKGROUND": "RUN_IN_BACKGROUND: ignore",
     "cmd appops get com.microsoft.teams RUN_IN_BACKGROUND": "RUN_IN_BACKGROUND: ignore",
     "cmd appops get org.videolan.vlc MANAGE_EXTERNAL_STORAGE": "MANAGE_EXTERNAL_STORAGE: allow",
