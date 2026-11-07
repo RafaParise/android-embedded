@@ -457,9 +457,10 @@ def test_mcp_initialize_negocia_versao_e_notificacao_volta_202(api):
     assert mcp(api, "ping")[1]["result"] == {}
 
 
-def test_mcp_lista_as_10_ferramentas_com_esquema(api):
+def test_mcp_lista_as_14_ferramentas_com_esquema(api):
     ferramentas = mcp(api, "tools/list")[1]["result"]["tools"]
-    assert [f["name"] for f in ferramentas] == ["projeto_listar", "projeto_ler", "projeto_buscar", "kit_listar", "kit_ler",
+    assert [f["name"] for f in ferramentas] == ["projeto_listar", "projeto_ler", "projeto_buscar", "projetos_lista", "projetos_mapa",
+                                                 "projetos_buscar", "projetos_ler", "kit_listar", "kit_ler",
                                                  "caixa_listar", "caixa_ler", "entregar", "navegador_ler", "acao_pc"]
     for f in ferramentas:
         assert f["description"] and f["inputSchema"]["type"] == "object"
