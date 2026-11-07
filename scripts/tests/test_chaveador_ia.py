@@ -167,6 +167,7 @@ def test_com_o_pc_no_ar_o_pedido_vai_ao_pc_com_a_chave_do_pc_e_um_pedido_por_con
     mundo.chaveador()
     cab, corpo = pede(mundo.porta)
     assert " 200 " in cab.splitlines()[0] and json.loads(corpo) == {"de": "pc"}
+    assert "Connection: close" in cab   # 06/11: sem isso o Qwen reaproveitava a conexao e via "400 (no body)"
     p = mundo.pedidos()[-1]
     assert p["auth"] == "Bearer chave-do-pc" and p["host"] == f"127.0.0.1:{mundo.pc_porta}" and p["conn"] == "close"
     assert mundo.cerebro() == "pc" and mundo.marcas() == []   # a reserva nem foi ligada

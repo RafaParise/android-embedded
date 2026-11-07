@@ -486,6 +486,16 @@ def reescreve(cab, destino):
     return b"\r\n".join(saida) + b"\r\n\r\n"
 
 
+def fecha_resposta(rcab):
+    linhas = rcab.split(b"\r\n")
+    saida = [linhas[0]]
+    for l in linhas[1:]:
+        if l and l.split(b":", 1)[0].strip().lower() not in (b"connection", b"keep-alive"):
+            saida.append(l)
+    saida.append(b"Connection: close")
+    return b"\r\n".join(saida) + b"\r\n\r\n"
+
+
 async def cano(r, w):
     try:
         while True:
@@ -542,7 +552,21 @@ async def atende(cr, cw):
         return
     anota(destino)
     w.write(reescreve(cab, destino))
-    await asyncio.gather(cano(cr, w), cano(r, cw), return_exceptions=True)
+    sobe = asyncio.ensure_future(cano(cr, w))   # o corpo do pedido segue enquanto a resposta nao chega
+    try:
+        rcab = await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 900)
+    except Exception:
+        for x in (cw, w):
+            try:
+                x.close()
+            except Exception:
+                pass
+        sobe.cancel()
+        return
+    # a resposta tambem diz "Connection: close": sem isso o cliente (06/11, Qwen) reaproveita a conexao, o 2o pedido cai num
+    # canal que o servidor ja vai fechar e o Matrix acusa "400 (no body)" com o servidor tendo respondido 200
+    cw.write(fecha_resposta(rcab))
+    await asyncio.gather(sobe, cano(r, cw), return_exceptions=True)
 
 
 async def vigia():
