@@ -17,6 +17,25 @@ case "$1" in
   pair) [ "$3" = 123456 ] && { touch "$FALSO_DIR/depuracao"; echo "Successfully paired"; exit 0; }; echo "Failed"; exit 1 ;;
   -s) shift 2; [ "$1" = shell ] || exit 1; shift; echo "SHELL $*" >> "$FALSO_LOG"
       case "$*" in
+        *"#VG-PASTA"*) [ -f "$FALSO_DIR/sem_pasta" ] || echo /storage/1A2B-3C4D/Dashcam ;;
+        *"#VG-TAM"*) [ -f "$FALSO_DIR/tam" ] || exit 0
+                     n=$(cat "$FALSO_DIR/tam"); [ -f "$FALSO_DIR/gravando" ] && n=$((n + 5000)); echo $n > "$FALSO_DIR/tam"; echo $n ;;
+        *"#VG-ULTIMO"*) echo /storage/1A2B-3C4D/Dashcam/VID_20261106_220000.mp4 ;;
+        *"#VG-CONTA"*) cat "$FALSO_DIR/videos" 2>/dev/null || echo 0 ;;
+        *"#VG-TAREFA"*) [ -f "$FALSO_DIR/camera_aberta" ] && echo "  * Task{e23d648 #554 type=standard A=10979:net.sourceforge.opencamera U=0 visible=true mode=freeform}" ;;
+        *"#VG-GIRO"*) echo "    SurfaceOrientation: 1" ;;
+        *"#VG-TELA"*) [ -f "$FALSO_DIR/tela_apagada" ] && echo "  mWakefulness=Asleep" || echo "  mWakefulness=Awake" ;;
+        *"#VG-BLOQ"*) [ -f "$FALSO_DIR/bloqueado_vg" ] && echo "isKeyguardShowing=true" ;;
+        *"input keyevent 224"*) rm -f "$FALSO_DIR/tela_apagada" ;;
+        *"windowingMode 5 -n net.sourceforge.opencamera"*) [ -f "$FALSO_DIR/oc_falha" ] || touch "$FALSO_DIR/camera_aberta" ;;
+        *"am force-stop net.sourceforge.opencamera"*) rm -f "$FALSO_DIR/camera_aberta" "$FALSO_DIR/gravando" ;;
+        *"input keyevent 24"*)
+          if [ -f "$FALSO_DIR/camera_aberta" ] && [ ! -f "$FALSO_DIR/oc_nao_grava" ]; then
+            if [ -f "$FALSO_DIR/gravando" ]; then rm -f "$FALSO_DIR/gravando"
+            else touch "$FALSO_DIR/gravando"; [ -f "$FALSO_DIR/tam" ] || echo 0 > "$FALSO_DIR/tam"; echo $(( $(cat "$FALSO_DIR/videos" 2>/dev/null || echo 0) + 1 )) > "$FALSO_DIR/videos"; fi
+          fi
+          k=$(( $(cat "$FALSO_DIR/teclas" 2>/dev/null || echo 0) + 1 )); echo $k > "$FALSO_DIR/teclas"
+          [ -f "$FALSO_DIR/para_apos" ] && [ "$k" -ge "$(cat "$FALSO_DIR/para_apos")" ] && rm -f "$FALSO_DIR/home/.cache/viagem/ligada" ;;
         *"#OTIMIZA-LER"*) cat "$FALSO_DIR/otimiza.txt" 2>/dev/null ;;
         *"#OTIMIZA-FAZ"*) echo "MemAvailable:    1536000 kB" ;;
         *"pm list packages"*) printf 'package:com.exemplo.um\npackage:com.samsung.android.smartmirroring\n' ;;
@@ -423,20 +442,7 @@ def test_nunca_deixa_o_celular_sem_internet(cel):
     assert cel.roda("dados", "desligar")[0] == 0 and "svc data disable" in cel.registro()
 
 
-# ---- cel viagem (06/11): FadCam grava em segundo plano no cartao, Organic Maps na tela, calor so AVISA
-AM_FADCAM = r"""#!/bin/bash
-echo "am $*" >> "$FALSO_LOG"
-case "$*" in
-  *RecordingStartActivity*)
-    [ -f "$FALSO_DIR/fadcam_falha" ] && exit 0
-    printf 'x%.0s' $(seq 1 1100) > "$VIAGEM_PASTA/FadCam_20261106_100000.mp4"   # o arquivo vazio (~1 KB) que o FadCam cria
-    f="$VIAGEM_PASTA/FadCam_20261106_100001.mp4"; : > "$f"; touch "$FALSO_DIR/gravando"
-    ( while [ -f "$FALSO_DIR/gravando" ]; do printf 'xxxxxxxxxxxxxxxx' >> "$f"; done ) >/dev/null 2>&1 &
-    ;;
-  *RecordingStopActivity*) rm -f "$FALSO_DIR/gravando" ;;
-esac
-exit 0
-"""
+# ---- cel viagem (06/11 noite): Open Camera numa janela flutuante sobre o Organic Maps; calor so AVISA, camera que cai volta
 EXTRAS_TERMUX = {
     "termux-notification": '#!/bin/bash\necho "notif $*" >> "$FALSO_LOG"\n',
     "termux-notification-remove": '#!/bin/bash\necho "notif-remove $*" >> "$FALSO_LOG"\n',
@@ -447,37 +453,38 @@ EXTRAS_TERMUX = {
 
 @pytest.fixture
 def viagem(cel):
-    pasta = cel.dir / "Viagens"
-    pasta.mkdir()
-    for nome, texto in {"am": AM_FADCAM, **EXTRAS_TERMUX}.items():
+    _conectado(cel)
+    for nome, texto in EXTRAS_TERMUX.items():
         (cel.dir / "bin" / nome).write_text(texto)
         (cel.dir / "bin" / nome).chmod(0o755)
-    extra = {"VIAGEM_PASTA": str(pasta)}
-    yield types.SimpleNamespace(cel=cel, pasta=pasta, roda=lambda *a: cel.roda(*a, extra=extra))
+    vg = cel.dir / "home" / ".cache" / "viagem"
+    yield types.SimpleNamespace(cel=cel, vg=vg, roda=lambda *a: cel.roda(*a))
+    (vg / "ligada").unlink(missing_ok=True)
     (cel.dir / "gravando").unlink(missing_ok=True)
-    (cel.dir / "home" / ".cache" / "viagem" / "ligada").unlink(missing_ok=True)
 
 
-def test_viagem_sem_am_ensina_a_instalar(cel):
-    (cel.dir / "bin" / "am").unlink()
-    rc, s = cel.roda("viagem", "iniciar")
-    assert rc == 1 and "pkg install termux-am" in s
+def _vigia_ligada(viagem, **arquivos):
+    viagem.vg.mkdir(parents=True, exist_ok=True)
+    (viagem.vg / "ligada").write_text("")
+    (viagem.vg / "pasta").write_text("/storage/1A2B-3C4D/Dashcam")
+    for nome, texto in arquivos.items():
+        (viagem.cel.dir / nome).write_text(texto)
 
 
-def test_viagem_iniciar_abre_o_fadcam_antes_grava_e_abre_o_mapa(viagem):
+def test_viagem_iniciar_abre_o_mapa_e_a_camera_em_janela_e_grava_pelo_volume(viagem):
     rc, s = viagem.roda("viagem", "iniciar")
-    assert rc == 0, s
     reg = viagem.cel.registro()
-    # o FadCam frio trava se mandar gravar na hora: abre o app ANTES do comando de gravar
-    assert reg.index("com.fadcam/.SplashActivity") < reg.index("RecordingStartActivity") < reg.index("app.organicmaps")
-    assert "Gravando a viagem" in s and "so AVISO" in s
+    assert rc == 0 and "Gravando a viagem" in s and "partes de 20 min" in s, s
+    assert reg.index("app.organicmaps") < reg.index("--windowingMode 5 -n net.sourceforge.opencamera")
+    assert "am task resize 554 1000 140 1510 470" in reg               # canto de cima a direita, deitado (testado 06/11)
+    assert reg.index("input tap 1040 178") < reg.index("input keyevent 24")   # foco na barra da janela antes do volume
     assert "notif" in reg and "Parar" in reg and "viagem parar" in reg
     assert "GRAVANDO" in viagem.roda("viagem", "status")[1]
-    assert "Ja esta gravando" in viagem.roda("viagem", "iniciar")[1]  # nao abre de novo por cima
+    assert "Ja esta gravando" in viagem.roda("viagem", "iniciar")[1]   # nao abre outra por cima
     rc, s = viagem.roda("viagem", "parar")
-    assert rc == 0 and "Gravacao parada" in s and "RecordingStopActivity" in viagem.cel.registro()
-    nomes = sorted(p.name for p in viagem.pasta.iterdir())
-    assert nomes == ["FadCam_20261106_100001.mp4"]  # o arquivo vazio de ~1 KB sumiu; o video ficou
+    assert rc == 0 and "Gravacao parada e salva" in s and "am force-stop net.sourceforge.opencamera" in viagem.cel.registro()
+    reg = viagem.cel.registro()
+    assert reg.rindex("input keyevent 24") < reg.rindex("am force-stop net.sourceforge.opencamera")   # para (salva) ANTES de fechar
     assert "Nao esta gravando" in viagem.roda("viagem", "status")[1]
 
 
@@ -488,68 +495,92 @@ def test_viagem_sem_mapa_nao_abre_o_organic_maps(viagem):
 
 
 def test_viagem_que_nao_comecou_explica_e_nao_vigia(viagem):
-    (viagem.cel.dir / "fadcam_falha").write_text("")
+    (viagem.cel.dir / "oc_nao_grava").write_text("")
     rc, s = viagem.roda("viagem", "iniciar")
-    assert rc == 1 and "NAO comecou" in s and "Fechar app" in s
-    assert not (viagem.cel.dir / "home" / ".cache" / "viagem" / "ligada").exists()
+    assert rc == 1 and "NAO comecou" in s and not (viagem.vg / "ligada").exists()
+    assert viagem.cel.registro().count("SHELL input keyevent 24") == 2   # uma tentativa a mais, nunca um vai e volta
 
 
-def test_viagem_sem_pasta_no_cartao(cel):
-    (cel.dir / "bin" / "am").write_text(AM_FADCAM)
-    (cel.dir / "bin" / "am").chmod(0o755)
-    rc, s = cel.roda("viagem", "iniciar", extra={"VIAGEM_PASTA": str(cel.dir / "nao-existe")})
-    assert rc == 1 and "cartao SD" in s and "SplashActivity" not in cel.registro()
+def test_viagem_sem_pasta_no_cartao(viagem):
+    (viagem.cel.dir / "sem_pasta").write_text("")
+    rc, s = viagem.roda("viagem", "iniciar")
+    assert rc == 1 and "pasta Dashcam" in s and "opencamera" not in viagem.cel.registro()
 
 
-def test_viagem_vigia_so_avisa_o_calor_e_desiste_depois_de_3_quedas(viagem):
-    vg = viagem.cel.dir / "home" / ".cache" / "viagem"
-    vg.mkdir(parents=True, exist_ok=True)
-    (vg / "ligada").write_text("")
-    (viagem.cel.dir / "temp").write_text("46.2")
-    (viagem.cel.dir / "fadcam_falha").write_text("")  # o FadCam nao volta: retoma 3 vezes e desiste com aviso
-    rc, _ = viagem.roda("viagem", "vigiar")
+def test_viagem_sem_conexao_ensina_o_jeito_a_mao(cel):
+    rc, s = cel.roda("viagem", "iniciar")
+    assert rc == 2 and "Open Camera em janela pop-up" in s
+
+
+def _para_em(viagem, segundos=2):
+    import threading, time
+    def tira():
+        time.sleep(segundos)
+        (viagem.vg / "ligada").unlink(missing_ok=True)
+    threading.Thread(target=tira).start()
+
+
+def test_viagem_quente_so_avisa_e_nunca_mexe_na_gravacao(viagem):
+    _vigia_ligada(viagem, camera_aberta="", gravando="", tam="100", temp="46.2")
+    _para_em(viagem)
+    rc, _ = viagem.cel.roda("viagem", "vigiar")
     reg = viagem.cel.registro()
     assert rc == 0 and "Celular QUENTE: 46 C" in reg and "Nada foi fechado" in reg and "vibra" in reg
-    assert reg.count("RecordingStartActivity") == 3 and "PAROU" in reg and "3 vezes" in reg and not (vg / "ligada").exists()
-    assert "RecordingStopActivity" not in reg and "force-stop" not in reg  # nunca fecha nada sozinho
+    assert "input keyevent 24" not in reg and "force-stop" not in reg and "windowingMode" not in reg   # nada e parado nem fechado
 
 
-def test_viagem_queda_do_fadcam_volta_sozinha(viagem):
-    assert viagem.roda("viagem", "iniciar")[0] == 0
-    (viagem.cel.dir / "gravando").unlink()  # o FadCam "caiu" (ninguem tocou em Parar)
-    import time
-    for _ in range(100):
-        if "VOLTOU sozinha" in viagem.cel.registro():
-            break
-        time.sleep(0.2)
+def test_viagem_esquentando_avisa_sem_vibrar(viagem):
+    _vigia_ligada(viagem, camera_aberta="", gravando="", tam="100", temp="43")
+    _para_em(viagem)
+    viagem.cel.roda("viagem", "vigiar")
     reg = viagem.cel.registro()
-    assert "VOLTOU sozinha" in reg and reg.count("RecordingStartActivity") >= 2
-    assert "GRAVANDO" in viagem.roda("viagem", "status")[1]
-    viagem.roda("viagem", "parar")
+    assert "esquentando: 43 C" in reg and "QUENTE" not in reg and "vibra" not in reg
 
 
-def test_viagem_vigia_atencao_sem_vibrar(viagem):
-    vg = viagem.cel.dir / "home" / ".cache" / "viagem"
-    vg.mkdir(parents=True, exist_ok=True)
-    (vg / "ligada").write_text("")
-    (viagem.cel.dir / "temp").write_text("43")
-    (viagem.cel.dir / "fadcam_falha").write_text("")  # sem gravacao que volte: a vigia termina depois das tentativas
-    viagem.roda("viagem", "vigiar")
+def test_viagem_camera_fechada_pelo_calor_volta_sozinha(viagem):
+    _vigia_ligada(viagem, tam="100", para_apos="1")   # sem camera_aberta: o sistema a fechou
+    viagem.cel.roda("viagem", "vigiar")
     reg = viagem.cel.registro()
-    assert "esquentando: 43 C" in reg and "QUENTE" not in reg
+    assert "--windowingMode 5 -n net.sourceforge.opencamera" in reg and "VOLTOU sozinha" in reg
+    assert (viagem.cel.dir / "gravando").exists()
 
 
-def test_viagem_lanterna_nao_mexe_no_fadcam_e_explica(viagem):
+def test_viagem_tela_apagada_e_bloqueada_pede_o_desbloqueio_e_nao_abre_por_cima(viagem):
+    _vigia_ligada(viagem, tam="100", tela_apagada="", bloqueado_vg="")
+    (viagem.cel.dir / "bin" / "termux-vibrate").write_text(
+        '#!/bin/bash\necho "vibra $*" >> "$FALSO_LOG"\nrm -f "$FALSO_DIR/home/.cache/viagem/ligada"\n')
+    viagem.cel.roda("viagem", "vigiar")
+    reg = viagem.cel.registro()
+    assert "input keyevent 224" in reg and "Desbloqueie" in reg and "windowingMode" not in reg
+    assert "keyevent 26" not in reg and "keyevent 223" not in reg   # nunca bloqueia nem apaga
+
+
+def test_viagem_parada_no_proprio_open_camera_e_respeitada(viagem):
+    _vigia_ligada(viagem, camera_aberta="", tam="100")   # janela aberta, sem gravar: foi o Rafael
+    viagem.cel.roda("viagem", "vigiar")
+    reg = viagem.cel.registro()
+    assert "Gravacao parada no Open Camera" in reg and not (viagem.vg / "ligada").exists()
+    assert "input keyevent 24" not in reg and "windowingMode" not in reg and "force-stop" not in reg
+
+
+def test_viagem_desiste_so_depois_de_40_tentativas_em_10_minutos(viagem):
+    _vigia_ligada(viagem, tam="100", oc_falha="")   # a camera nunca abre
+    viagem.cel.roda("viagem", "vigiar")
+    reg = viagem.cel.registro()
+    assert reg.count("SHELL am start --windowingMode 5 -n net.sourceforge.opencamera") == 40 and "PAROU" in reg
+
+
+def test_viagem_lanterna_explica(viagem):
     rc, s = viagem.roda("viagem", "lanterna")
-    assert rc == 1 and "trava" in s and "TOGGLE_TORCH" not in viagem.cel.registro()  # 06/11: apagar travou o FadCam
+    assert rc == 1 and "nao libera a lanterna" in s
     assert viagem.roda("viagem", "talvez")[0] == 2
 
 
-def test_lanterna_ocupada_ensina_a_do_fadcam(cel):
+def test_lanterna_ocupada_explica_pela_viagem(cel):
     (cel.dir / "bin" / "termux-torch").write_text("#!/bin/bash\nexit 1\n")
     (cel.dir / "bin" / "termux-torch").chmod(0o755)
     rc, s = cel.roda("lanterna", "ligar")
-    assert rc == 1 and "lanterna segura" in s
+    assert rc == 1 and "cel viagem lanterna" in s
 
 
 OTIMIZA = """M=1024000

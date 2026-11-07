@@ -45,31 +45,34 @@ Se o pedido bate com uma linha daqui, rode o comando NA HORA, sem buscar antes, 
 - `gravar-tela` leva o som do celular; o microfone do celular fica MUDO sem fone (privacidade, `cel microfone status`).
 - Live: o destino e a chave ficam no OBS do PC (o Rafael configura uma vez); nunca peça nem grave a chave.
 
-## Câmera de viagem: FadCam em segundo plano + Organic Maps na tela [Provado no A12 em 06/11 ~13:00–14:16]
-Por que o FadCam: o Open Camera FECHA a câmera ao sair da tela (código atual dele, `Preview.onPause` -> `closeCamera`); só grava em tela dividida.
-O FadCam (F-Droid, GPL-3.0, 3.0.1, hash conferido com o índice assinado) grava como serviço, com o aviso na barra.
-- Ativar: `cel viagem iniciar` (abre o FadCam, espera 7 s porque frio ele TRAVA se mandar gravar na hora, grava, abre o Organic Maps).
-  Parar: `cel viagem parar` ou "Stop" no aviso do FadCam (barra de cima > aviso FadCam > Stop). Estado: `cel viagem status`.
-- Onde ficam: cartão SD, pasta `Viagens` (`/storage/1A2B-3C4D/Viagens`), partes de 500 MB (~4 min a 16 Mbps): um travamento perde no máximo uma parte.
-- Ajustes feitos (06/11): traseira (a única lente que o Android entrega a apps), 1080p, 30 qps (máximo real do A12: `aeAvailableTargetFpsRanges` até 30),
-  H.264 a 16 Mbps (o A12 não grava HEVC; 16 é a dica do próprio app para 1080p), deitado, data e hora no vídeo, local (GPS) no arquivo,
-  foco contínuo (não há foco fixo no infinito), sem redução de ruído (experimental), sem busca de atualização. App em inglês (não tem português).
-- Medido: 3 min 9 s, 1920x1080, 15,9 Mbps, 0 erro ao decodificar; gravação seguiu com o Organic Maps em tela cheia, girando a tela e abrindo a barra de avisos.
-- Calor: o `cel viagem` vigia a bateria a cada minuto e só AVISA (42 °C: aviso; 45 °C: aviso com vibração). Nada é fechado por ele.
-- Quedas do FadCam [Certo: registro de falhas, 06/11]: reabrir o app durante a gravação às vezes o derruba. CONSERTO (06/11 ~15:10): a vigia
-  do `cel viagem` (a cada 15 s) RETOMA sozinha a gravação e reabre o mapa (provado: queda forçada 15:08:11, nova parte 15:08:41, aviso
-  "VOLTOU sozinha"); até 3 retomadas em 10 min, depois avisa "PAROU". A parte interrompida NÃO se perde: o FadCam grava MP4 fragmentado
-  (moof), conferido: a parte cortada abriu com 20,5 s. O "Stop" do aviso do FadCam foi ESCONDIDO: parar = botão "Parar" do aviso
-  "Gravando a viagem" (testado) ou o Matrix; qualquer outra parada é tratada como queda. (2) Lanterna durante a gravação: o FadCam acende, mas ao apagar TRAVA:
-  `cel viagem lanterna` só explica. (3) O FadCam cria um arquivo vazio de ~1 KB ao começar pelo comando; o `cel viagem parar` apaga só esses.
-- Precisa: `termux-am` (pkg) e o Termux com "Sobrepor a outros apps" (appops SYSTEM_ALERT_WINDOW allow, dado em 06/11; desfaz: `appops set com.termux SYSTEM_ALERT_WINDOW default`).
+## Câmera de viagem: Open Camera em janela flutuante sobre o Organic Maps [Provado no A12 em 06/11 ~21:10–21:30]
+O Rafael tirou o FadCam (06/11 à noite) e prefere o Open Camera ("dessa vez não fechou e nem esquentou muito", em 720p). O Open Camera
+só grava VISÍVEL; por isso o `cel viagem` o abre numa JANELA FLUTUANTE (pop-up da Samsung) no canto de cima, por cima do mapa em tela cheia.
+- Ativar: `cel viagem iniciar` (abre o Organic Maps, abre o Open Camera com `am start --windowingMode 5`, põe a janela no canto com
+  `am task resize`, toca na barra da janela para dar o foco e aperta volume para cima: no Open Camera isso começa/para a gravação; o volume
+  de mídia não muda). `--sem-mapa` não abre o mapa. Parar: botão "Parar" do aviso "Gravando a viagem" ou `cel viagem parar` (para pelo
+  volume, confere que o arquivo parou de crescer e só então fecha a janela). Estado: `cel viagem status`. Precisa da conexão do `cel` (5555).
+- Sem a conexão: à mão, abra o Organic Maps, depois o Open Camera em janela pop-up (Recentes > ícone do app > Abrir em visualização pop-up) e grave.
+- Onde ficam: cartão SD, pasta `Dashcam` (a pasta do Open Camera), `VID_*.mp4` + `.srt` (data, hora e GPS).
+- Ajustes do vídeo para viagem, dia e noite (06/11 ~21:10; cópia antes: Open Camera > Configurações > Settings manager > Restore settings >
+  `BACKUP_OC_20261106_210930`): 1280x720 (escolha dele: esquenta menos), estabilização ligada, MP4/H.264, taxa de bits padrão (medido ~9 Mbps),
+  quadros "Padrão" (à noite a câmera pode baixar os quadros para clarear; o A12 vai até 30), partes de 20 min com "Repetir 10x" (até 3h40
+  seguidas; era 1 h), reinício no tamanho máximo ligado, "Travar tela enquanto filma" LIGADO (um toque sem querer não para; deslize para
+  destravar), lanterna durante a filmagem desligada, aviso de bateria crítica ligado, legendas .srt ligadas. Foto e detecção de rosto: não mexidos.
+- Calor: só AVISO (42 °C aviso; 45 °C aviso com vibração). O SDHMS da Samsung pode fechar a câmera no calor e sem root isso NÃO sai
+  (código decompilado em 06/11: só poupa tela inicial, apps de navegação, listas embutidas e da Samsung, Gear VR e modo VR, que o A12 não tem
+  — `cmd vr` não existe). Contorno provado: se a câmera cair, a vigia (15 s) acende a tela, espera o desbloqueio se precisar e reabre a
+  câmera gravando (queda forçada às 21:24:55, novo arquivo às 21:25:26); o pedaço já gravado NÃO se perde (quem grava é o serviço de mídia do
+  Android: o arquivo cortado à força abriu inteiro, 28 s, ffmpeg sem erro). Desiste só depois de 40 tentativas em 10 min.
+- Parou pelo próprio Open Camera (ou acabaram as 11 partes)? A vigia respeita e avisa "Gravação parada no Open Camera".
+- Lanterna com a câmera gravando: o Android não libera (a câmera está em uso); `cel viagem lanterna` só explica.
 
 ## Calor: por que a câmera fechava e o mapa ficava [Certo: código do SDHMS do próprio aparelho, decompilado em 06/11]
 - O serviço térmico da Samsung (`com.sec.android.sdhms`, desativado desde 30/10 mas o Android o mantém rodando por ser persistente) tem o
   "Overheat App Kill": fecha à força (`forceStopPackageAsUser`) o app VISÍVEL na tela e apaga a tela. Poupa: tela inicial, apps de
   navegação (lista "Navigation", por isso o Organic Maps fica), a lista "except_ovt" e pacotes protegidos. Também tem `flash_led_disable`
   (o flash pisca/apaga no calor) e `camera_recording_disable`. Remover ou desligar exige root (decidido não fazer).
-- Saída: gravar com o FadCam em segundo plano (`cel viagem`), que não é "visível" e por isso não entra na regra; o aviso de calor fica com o `cel viagem`.
+- Saída (06/11 noite, com o Open Camera): a câmera que o calor fecha VOLTA sozinha pelo `cel viagem` e o que já foi gravado fica salvo (seção acima).
 
 ## O celular reiniciou sozinho [06/11 08:05]
 - Ver o motivo: `cel sh "getprop sys.boot.reason"`. `kernel_panic,...watchdog_timer...100s` = o sistema ficou 100 s sem responder.
@@ -96,7 +99,7 @@ O FadCam (F-Droid, GPL-3.0, 3.0.1, hash conferido com o índice assinado) grava 
 - **Um processo só:** o Matrix abria dois `node` (um "supervisor" de ~30 MB); desde 06/11 `QWEN_CODE_NO_RELAUNCH=true` no `ia`
   (no Linux o Qwen 0.26.5 já liga o `gc` no próprio processo; conferido no `cli-entry.js`). Provado: um processo. `IA_RELANCAR=1` volta.
 - **Liberar RAM e CPU:** `cel otimizar` (fecha com `am kill` os apps PARADOS em cache, que continuam recebendo avisos; `force-stop` só nos
-  utilitários parados (CPU Info, Binary Eye, LocalSend) e no FadCam parado; nada visível, nada com serviço, nenhum `com.android.*`, gms,
+  utilitários parados (CPU Info, Binary Eye, LocalSend); nada visível, nada com serviço, nenhum `com.android.*`, gms,
   teclado, telefone, SMS, relógio, tela inicial, papel, Termux, Tailscale, KDE Connect, EnforceDoze). Mostra a RAM antes e depois.
   Medido: 1190 → 1584 MB (+393 MB, 17 apps). `cel otimizar --tudo` encerra também o ScreenStream transmitindo à toa (se nenhum `link` estiver no ar).
 - **O que fica rodando sempre e por quê (revisado em 06/11):** vigia da tela (`app_process Tela`, 24 MB: o gesto de apagar e o Wi-Fi turbo),

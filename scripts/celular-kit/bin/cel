@@ -9,7 +9,7 @@
 #   cel economia-dados ligar|desligar|status   Economia de dados do Android (sem dado em segundo plano no 4G; nao comprime)
 #   cel acordado ligar|desligar|status         Permanecer acordado enquanto carrega (tela nao apaga no cabo)
 #   cel lanterna ligar|desligar                Lanterna (Termux:API; funciona sem a depuracao sem fio)
-#   cel viagem iniciar|parar|status            camera de viagem: FadCam grava em 2o plano no cartao, mapa na tela, calor so avisa
+#   cel viagem iniciar|parar|status            camera de viagem: Open Camera em janela sobre o mapa, cartao SD/Dashcam, calor so avisa
 #   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados (RAM antes/depois; --tudo para tambem o ScreenStream ocioso)
 #   cel abrir TELA | cel telas      abre a tela de configuracao (wifi, bluetooth, tela, som, bateria, apps, armazenamento, desenvolvedor...)
 #   cel abrir-app PACOTE · cel apps [texto] · cel procurar TEXTO (arquivos, apps e configuracoes)
@@ -476,74 +476,105 @@ case "${1:-status}" in
   lanterna) # Lanterna pelo Termux:API (nao precisa da depuracao sem fio)
     command -v termux-torch >/dev/null 2>&1 || { echo "Falta o termux-torch (pkg install termux-api e o app Termux:API)."; exit 1; }
     case "${2:-}" in
-      ligar) termux-torch on && echo "Lanterna ligada (desligar: cel lanterna desligar)." || { echo "Nao liguei: a camera deve estar em uso (gravando video?). Com a gravacao do FadCam ligada nao ha lanterna segura (cel viagem lanterna explica)."; exit 1; } ;;
+      ligar) termux-torch on && echo "Lanterna ligada (desligar: cel lanterna desligar)." || { echo "Nao liguei: a camera deve estar em uso (gravando video?). Com a camera gravando a viagem nao ha lanterna segura (cel viagem lanterna explica)."; exit 1; } ;;
       desligar) termux-torch off && echo "Lanterna desligada." ;;
       *) echo "Use: cel lanterna ligar|desligar"; exit 2 ;;
     esac ;;
-  viagem) # camera de viagem (06/11): o FadCam grava em SEGUNDO PLANO no cartao e o Organic Maps fica na tela; o calor so AVISA
+  viagem) # camera de viagem (06/11 noite; o Rafael tirou o FadCam e prefere o Open Camera): Open Camera numa JANELA FLUTUANTE
+    # sobre o Organic Maps em tela cheia (os dois na tela: o Open Camera so grava visivel), video na pasta Dashcam do cartao.
+    # Provado no A12: am start --windowingMode 5 + am task resize; volume para cima comeca e para (o volume de midia nao muda).
     VG="$HOME/.cache/viagem"; mkdir -p "$VG"
     SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
-    # o Termux nao lista /storage; o cartao aparece nas montagens (06/11: /storage/1A2B-3C4D)
-    PASTA="${VIAGEM_PASTA:-$(grep -o ' /storage/[0-9A-F][0-9A-F]*-[0-9A-F][0-9A-F]*' /proc/self/mounts 2>/dev/null | head -1 | tr -d ' ')/Viagens}"
-    command -v am >/dev/null 2>&1 || { echo "Falta o am do Termux: pkg install termux-am (e o Termux com 'Sobrepor a outros apps')."; exit 1; }
-    ultimo() { ls -t "$PASTA"/FadCam_*.mp4 2>/dev/null | head -1; }
-    tam() { local f; f=$(ultimo); [ -n "$f" ] && wc -c < "$f" 2>/dev/null || echo 0; }
+    OC=net.sourceforge.opencamera
+    adb_ok() { conecta 2>/dev/null && S=$(serial) && [ -n "$S" ]; }
+    pasta() { [ -n "${VIAGEM_PASTA:-}" ] && { echo "$VIAGEM_PASTA"; return; }; sh_ "ls -d /storage/*-*/Dashcam 2>/dev/null | head -1 #VG-PASTA" 2>/dev/null | tr -d '\r' | head -1; }
+    tam() { local x; x=$(sh_ "f=\$(ls -t '$PASTA'/VID_*.mp4 2>/dev/null | head -1); [ -n \"\$f\" ] && stat -c %s \"\$f\" #VG-TAM" 2>/dev/null | tr -d '\r' | head -1)
+      case "$x" in ''|*[!0-9]*) echo 0 ;; *) echo "$x" ;; esac; }
+    ultimo() { sh_ "ls -t '$PASTA'/VID_*.mp4 2>/dev/null | head -1 #VG-ULTIMO" 2>/dev/null | tr -d '\r' | head -1; }
     crescendo() { local a b; a=$(tam); sleep "${VIAGEM_OLHA:-3}"; b=$(tam); [ "$b" -gt "$a" ]; }
-    temperatura() { termux-battery-status 2>/dev/null | python3 -c 'import json,sys; print(int(float(json.load(sys.stdin)["temperature"])))' 2>/dev/null; }
-    comeca() { # o FadCam frio TRAVA se mandar gravar na hora (06/11: ForegroundServiceDidNotStartInTime): abre, espera, grava
-      am start -n com.fadcam/.SplashActivity >/dev/null 2>&1 || return 1
-      sleep "${VIAGEM_ESPERA:-7}"
-      am start -n com.fadcam/.RecordingStartActivity >/dev/null 2>&1
-      sleep "${VIAGEM_ESPERA2:-5}"
-      [ -f "$VG/sem-mapa" ] || am start -n app.organicmaps/.DownloadResourcesActivity >/dev/null 2>&1
+    janela_aberta() { sh_ "dumpsys activity activities | grep -m1 'Task{.*:$OC' #VG-TAREFA" 2>/dev/null | sed -n 's/.*#\([0-9][0-9]*\) .*/\1/p' | head -1; }
+    canto() { # x1 y1 x2 y2 da janela da camera: deitado = canto de cima a direita (testado 06/11); em pe = em cima a direita
+      [ -n "${VIAGEM_JANELA:-}" ] && { echo "$VIAGEM_JANELA"; return; }
+      case "$(sh_ "dumpsys input | grep -m1 SurfaceOrientation #VG-GIRO" 2>/dev/null | tr -dc '0-9')" in
+        1|3) echo "1000 140 1510 470" ;;
+        *) echo "300 120 715 520" ;;
+      esac
+    }
+    foca() { set -- $(canto); sh_ "input tap $(( $1 + 40 )) $(( $2 + 38 ))" >/dev/null 2>&1; sleep 0.5; }   # barra da janela: so da o foco, nao aperta nada
+    tecla_gravar() { foca; sh_ "input keyevent 24" >/dev/null 2>&1; }   # volume para cima no Open Camera = comecar/parar (o volume de midia nao muda)
+    tela_ok() { # acende a tela se o calor a apagou (o SDHMS apaga ao fechar o app); com o bloqueio na frente, a camera nao abre por cima
+      case "$(sh_ "dumpsys power | grep -m1 mWakefulness= #VG-TELA" 2>/dev/null)" in *Asleep*|*Dozing*) sh_ "input keyevent 224" >/dev/null 2>&1; sleep 1 ;; esac
+      case "$(sh_ "dumpsys window | grep -m1 isKeyguardShowing #VG-BLOQ" 2>/dev/null)" in *isKeyguardShowing=true*) return 1 ;; esac
       return 0
     }
+    comeca() { # mapa em tela cheia, camera na janela por cima, volume = gravar
+      [ -f "$VG/sem-mapa" ] || { sh_ "am start -n app.organicmaps/.DownloadResourcesActivity" >/dev/null 2>&1; sleep "${VIAGEM_ESPERA_MAPA:-3}"; }
+      sh_ "am start --windowingMode 5 -n $OC/.MainActivity" >/dev/null 2>&1 || return 1
+      sleep "${VIAGEM_ESPERA:-4}"
+      local id; id=$(janela_aberta); [ -n "$id" ] || return 1
+      sh_ "am task resize $id $(canto)" >/dev/null 2>&1
+      sleep "${VIAGEM_ESPERA2:-2}"
+      tecla_gravar
+      return 0
+    }
+    temperatura() { termux-battery-status 2>/dev/null | python3 -c 'import json,sys; print(int(float(json.load(sys.stdin)["temperature"])))' 2>/dev/null; }
     aviso() { # $1 id, $2 titulo, $3 texto, resto = opcoes extras
       command -v termux-notification >/dev/null 2>&1 || return 0
       local id=$1 t=$2 x=$3; shift 3
       termux-notification --id "$id" --title "$t" --content "$x" "$@" >/dev/null 2>&1
     }
+    sem_conexao() { echo "Sem conexao com o sistema (cel conectar). Sem ela, a mao: abra o Organic Maps, depois o Open Camera em janela pop-up, e grave."; exit 2; }
     case "${2:-status}" in
       iniciar|ligar|gravar)
-        [ -n "$PASTA" ] && [ -d "$PASTA" ] || { echo "Nao achei a pasta Viagens no cartao SD (o cartao esta no celular?)."; exit 1; }
+        adb_ok || sem_conexao
+        PASTA=$(pasta)
+        [ -n "$PASTA" ] || { echo "Nao achei a pasta Dashcam no cartao SD (o cartao esta no celular? e la que o Open Camera grava)."; exit 1; }
+        echo "$PASTA" > "$VG/pasta"
         if crescendo; then echo "Ja esta gravando: $(basename "$(ultimo)")."; exit 0; fi
         if [ "${3:-}" = "--sem-mapa" ]; then : > "$VG/sem-mapa"; else rm -f "$VG/sem-mapa"; fi
-        comeca || { echo "Nao abri o FadCam (instalado?)."; exit 1; }
+        comeca || { echo "Nao abri o Open Camera em janela (instalado?)."; exit 1; }
         if ! crescendo; then
-          echo "A gravacao NAO comecou. Abra o FadCam e toque em Start (se aparecer 'o app apresenta falhas', toque em Fechar app e tente de novo)."
-          exit 1
+          tecla_gravar   # so mais uma vez (nao esta gravando, entao isto so comeca)
+          crescendo || { echo "A gravacao NAO comecou. Toque no botao de gravar do Open Camera, na janela do canto."; exit 1; }
         fi
-        : > "$VG/ligada"
+        : > "$VG/ligada"; rm -f "$VG/retomadas"
         nohup bash "$SELF" viagem vigiar >/dev/null 2>&1 </dev/null &
         echo $! > "$VG/vigia.pid"
-        aviso viagem "Gravando a viagem" "Parar: so por ESTE botao (ou pelo Matrix). Caiu? Volta sozinha. Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
-        echo "Gravando a viagem no cartao ($PASTA), em segundo plano; o mapa ficou na tela."
-        echo "Parar: botao Parar do aviso 'Gravando a viagem' ou cel viagem parar. Se o FadCam cair (ate reaberto pelo icone), a gravacao VOLTA sozinha."
-        echo "Calor: so AVISO (nada e fechado)."
+        aviso viagem "Gravando a viagem" "Parar: este botao (ou o Matrix). Se o Open Camera fechar sozinho, volta. Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
+        echo "Gravando a viagem no cartao ($PASTA), Open Camera na janela do canto e o mapa na tela; partes de 20 min."
+        echo "Parar: botao Parar do aviso 'Gravando a viagem' ou cel viagem parar. Se o Open Camera fechar sozinho (calor), a gravacao VOLTA."
+        echo "Calor: so AVISO. O sistema da Samsung pode fechar a camera no calor (sem root nao sai): se fechar, a camera volta sozinha (~30 s) e o que ja foi gravado fica salvo."
         ;;
       parar)
         rm -f "$VG/ligada"
-        am start -n com.fadcam/.RecordingStopActivity >/dev/null 2>&1
         p=$(cat "$VG/vigia.pid" 2>/dev/null); case "$p" in ''|*[!0-9]*) ;; *) kill "$p" 2>/dev/null ;; esac; rm -f "$VG/vigia.pid"
         command -v termux-notification-remove >/dev/null 2>&1 && { termux-notification-remove viagem; termux-notification-remove viagem-calor; termux-notification-remove viagem-volta; } >/dev/null 2>&1
-        sleep "${VIAGEM_OLHA:-3}"
-        # o comando de comecar cria um arquivo vazio (~1 KB) ao lado do video: so esses somem
-        find "$PASTA" -maxdepth 1 -name 'FadCam_*.mp4' -size -4k -delete 2>/dev/null
-        n=$(ls "$PASTA"/FadCam_*.mp4 2>/dev/null | wc -l)
-        echo "Gravacao parada. Videos na pasta Viagens do cartao: $n (os mais novos por ultimo: ls -t)."
+        adb_ok || { echo "Sem conexao com o sistema: pare no Open Camera (deslize na tela para destravar e toque no botao)."; exit 2; }
+        PASTA=$(cat "$VG/pasta" 2>/dev/null); [ -n "$PASTA" ] || PASTA=$(pasta)
+        if crescendo; then tecla_gravar; sleep "${VIAGEM_OLHA:-3}"; fi
+        if crescendo; then echo "O video AINDA esta gravando: pare no Open Camera (deslize para destravar e toque no botao)."; exit 1; fi
+        sh_ "am force-stop $OC" >/dev/null 2>&1   # ja parado e salvo: so fecha a janela da camera
+        n=$(sh_ "ls '$PASTA'/VID_*.mp4 2>/dev/null | wc -l #VG-CONTA" 2>/dev/null | tr -dc '0-9')
+        echo "Gravacao parada e salva. Videos na pasta Dashcam do cartao: ${n:-?}."
         ;;
       status)
-        if crescendo; then echo "GRAVANDO: $(basename "$(ultimo)") ($(( $(tam) / 1048576 )) MB nesta parte; partes de ~500 MB, ~5 min)."
+        adb_ok || sem_conexao
+        PASTA=$(pasta)
+        if crescendo; then echo "GRAVANDO: $(basename "$(ultimo)") ($(( $(tam) / 1048576 )) MB nesta parte; partes de 20 min, ~7 Mbps em 720p)."
         else echo "Nao esta gravando. Comecar: cel viagem iniciar"; fi
         t=$(temperatura); [ -n "$t" ] && echo "Temperatura da bateria: $t C (aviso a partir de ${VIAGEM_ATENCAO:-42} C; nada e fechado)."
-        livre=$(df -h "$PASTA" 2>/dev/null | awk 'NR==2 {print $4}'); [ -n "$livre" ] && echo "Livre no cartao: $livre."
         ;;
-      lanterna) # 06/11, testado no A12: o "alternar lanterna" do FadCam ACENDE, mas o segundo (apagar) TRAVA o FadCam e a gravacao para
-        echo "Com a gravacao ligada nao ha lanterna segura: o FadCam acende, mas ao apagar ele trava e a gravacao para (testado 06/11)."
-        echo "A noite o flash so reflete no para-brisa. Se precisar mesmo de luz: cel viagem parar, cel lanterna ligar."
+      lanterna)
+        echo "Com a camera gravando, o Android nao libera a lanterna (a camera esta em uso). A noite o flash so reflete no para-brisa."
+        echo "Se precisar mesmo de luz: cel viagem parar e depois cel lanterna ligar."
         exit 1 ;;
-      vigiar) # (interno) a cada 15 s: temperatura (so AVISA, nunca fecha app) e se a gravacao segue (caiu = retoma sozinho)
-        parado=0; : > "$VG/retomadas"
+      vigiar) # (interno) a cada 15 s: temperatura (so AVISA, nunca fecha app) e se a gravacao segue
+        # O Rafael (06/11): "nao deve nunca fechar por excesso de calor, eu assumo o risco". O SDHMS da Samsung fecha o app VISIVEL
+        # no calor e sem root isso nao sai (codigo decompilado: so poupa tela inicial, navegacao, listas da Samsung e modo VR, que o
+        # A12 nao tem). Contorno: se a camera cair, ela volta sozinha (~30 s; medido 06/11 com am force-stop, o mesmo que o SDHMS usa).
+        # O pedaco ja gravado NAO se perde: quem grava e o servico de midia do Android, que fecha o MP4 quando o app morre
+        # (medido 06/11: arquivo cortado a forca abriu inteiro, 28 s, ffmpeg sem erro).
+        PASTA=$(cat "$VG/pasta" 2>/dev/null); parado=0
         while [ -f "$VG/ligada" ]; do
           t=$(temperatura)
           if [ -n "$t" ] && [ "$t" -ge "${VIAGEM_QUENTE:-45}" ]; then
@@ -552,14 +583,26 @@ case "${1:-status}" in
           elif [ -n "$t" ] && [ "$t" -ge "${VIAGEM_ATENCAO:-42}" ]; then
             aviso viagem-calor "Celular esquentando: $t C" "So aviso: a gravacao e o mapa seguem."
           fi
+          if ! adb_ok; then sleep "${VIAGEM_INTERVALO:-15}"; continue; fi
           if crescendo; then parado=0; else parado=$((parado + 1)); fi
           if [ "$parado" -ge 2 ] && [ -f "$VG/ligada" ]; then
-            # parou sem o "Parar" (o unico jeito de parar e o botao do aviso ou o Matrix): o FadCam caiu -> retoma sozinho
+            if [ -n "$(janela_aberta)" ]; then
+              # a janela da camera segue aberta e parou: foi o Rafael no proprio Open Camera (ou acabaram as 11 partes) -> respeita
+              rm -f "$VG/ligada"
+              aviso viagem "Gravacao parada no Open Camera" "Parou pelo app (ou fim das 11 partes de 20 min). Gravar de novo: cel viagem iniciar"
+              break
+            fi
+            # a camera sumiu (o calor da Samsung fecha o app visivel, ou travou) -> volta sozinha, sempre (ate VIAGEM_RETOMADAS em 10 min)
+            if ! tela_ok; then
+              aviso viagem-volta "Desbloqueie a tela" "O calor fechou a camera e apagou a tela. Desbloqueie: a gravacao volta sozinha." --priority high
+              command -v termux-vibrate >/dev/null 2>&1 && termux-vibrate -d 300 >/dev/null 2>&1
+              sleep "${VIAGEM_INTERVALO:-15}"; continue
+            fi
             agora=$(date +%s)
             recentes=$(awk -v l=$((agora - 600)) '$1 > l' "$VG/retomadas" 2>/dev/null | wc -l)
-            if [ "$recentes" -ge "${VIAGEM_RETOMADAS:-3}" ]; then
+            if [ "$recentes" -ge "${VIAGEM_RETOMADAS:-40}" ]; then
               rm -f "$VG/ligada"
-              aviso viagem "A gravacao da viagem PAROU" "O FadCam caiu 3 vezes em 10 min. Gravar de novo: cel viagem iniciar" --priority high
+              aviso viagem "A gravacao da viagem PAROU" "O Open Camera nao ficou aberto (40 vezes em 10 min). Gravar de novo: cel viagem iniciar" --priority high
               command -v termux-vibrate >/dev/null 2>&1 && termux-vibrate -d 300 >/dev/null 2>&1
               break
             fi
@@ -567,7 +610,7 @@ case "${1:-status}" in
             comeca
             if crescendo; then
               parado=0
-              aviso viagem-volta "A gravacao caiu e VOLTOU sozinha" "O FadCam travou; um novo arquivo comecou na pasta Viagens." --priority high
+              aviso viagem-volta "A gravacao caiu e VOLTOU sozinha" "O Open Camera tinha fechado; um novo arquivo comecou na pasta Dashcam." --priority high
             fi
           fi
           sleep "${VIAGEM_INTERVALO:-15}"
