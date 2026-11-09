@@ -82,9 +82,9 @@ if ($FecharOllama -and -not $SoVerificar) {
     if (Serve @('--bg', '--tcp=11434', 'tcp://127.0.0.1:11434')) { Ok 'Porta do Ollama (11434) aberta so para a tailnet' }
 }
 if ($AbrirOllama -and -not $SoVerificar -and (Test-Path $marcaOllama)) { [IO.File]::Delete($marcaOllama) }
-if (ServeAtivo 11434) { Ok 'Porta do Ollama (11434) aberta so para a tailnet (o Matrix usa sem cabo, com Wi-Fi ou dados moveis)' }
+if (ServeAtivo 11434) { Ok 'Porta do Ollama (11434) aberta so para a tailnet (o parise-core usa sem cabo, com Wi-Fi ou dados moveis)' }
 elseif (Test-Path $marcaOllama) { Aviso 'Porta do Ollama fechada por escolha (-FecharOllama). Para abrir: ia-do-pc.cmd -AbrirOllama' }
-else { FalhaLeve 'Porta do Ollama fechada: o Matrix nao alcanca o modelo do PC (rode ia-do-pc.cmd).' }
+else { FalhaLeve 'Porta do Ollama fechada: o parise-core nao alcanca o modelo do PC (rode ia-do-pc.cmd).' }
 
 # 5) Ponte do projeto (ponte-pc, porta 20130): projeto ao vivo, skills e caixa de recados para o Qwen do celular (MCP). So tailnet.
 function PonteNoAr { (CodigoHttp 'http://127.0.0.1:20130/saude') -eq 200 }

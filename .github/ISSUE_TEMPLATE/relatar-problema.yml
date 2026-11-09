@@ -1,5 +1,5 @@
 name: Relatar um problema
-description: Um script ou o Matrix não funciona como devia.
+description: Um script ou o parise-core não funciona como devia.
 title: "[Problema] "
 labels: ["bug"]
 body:

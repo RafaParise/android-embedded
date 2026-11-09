@@ -1,6 +1,6 @@
 # Voz offline (ditado) no celular e no PC — 05/11/2026
 
-Pedido do Rafael e do Matrix (PEDIDO 20261105-104547): digitar por voz sem Google, sem nuvem, código aberto.
+Pedido do Rafael e do parise-core (PEDIDO 20261105-104547): digitar por voz sem Google, sem nuvem, código aberto.
 Escolhidos programas prontos no lugar dos scripts do pedido (servidor STT no PC e cliente no celular): menos peças, funciona sem rede.
 
 ## Celular: WhisperIME
@@ -23,5 +23,5 @@ Escolhidos programas prontos no lugar dos scripts do pedido (servidor STT no PC 
 - Desfazer: Configurações > Aplicativos > Handy > Desinstalar.
 
 ## Microfone e som do JBL (o que NÃO fazer para ditar)
-- `cel microfone sempre` abre o canal de ligação do Bluetooth (HFP/SCO): som do fone mono de 16 kHz, o "fundo de balde". Em 05/11 o Matrix fez isso sem pedido e o Rafael ouviu. Padrão: `gravar` (auto). O Matrix tem `sempre` e `desligado` bloqueados nas regras.
+- `cel microfone sempre` abre o canal de ligação do Bluetooth (HFP/SCO): som do fone mono de 16 kHz, o "fundo de balde". Em 05/11 o parise-core fez isso sem pedido e o Rafael ouviu. Padrão: `gravar` (auto). O parise-core tem `sempre` e `desligado` bloqueados nas regras.
 - Microfone do JBL no celular será sempre qualidade de ligação (limite do Bluetooth HFP) [Provável: perfil HFP com mSBC = 16 kHz]. Para ditar com mais qualidade: microfone do próprio celular, ou o JBL no PC pelo receptor USB (Handy).

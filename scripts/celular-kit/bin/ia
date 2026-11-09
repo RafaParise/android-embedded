@@ -1,13 +1,13 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# ia - o unico comando para usar a IA no celular (MATRIX: agente + modelos). Versao 2026-11-01.
+# ia - o unico comando para usar a IA no celular (PARISE-CORE: agente + modelos). Versao 2026-11-01.
 # Guia completo: memoria/GUIA-IA-NO-CELULAR.md (no celular: ~/GUIA-IA.md).
-#   ia               automatico: usa o melhor cerebro ao alcance e abre o Matrix na pasta do projeto (os comandos matrix e qwen abrem por aqui)
-#   ia "pedido"      idem, ja com o pedido:  matrix "ligue o modo economia"  |  ia codigo "revise o script X"
-#   ia codigo        Matrix com os modelos GRATIS da nuvem (OmniRoute do PC, pela Tailscale ou pelo cabo): programar
+#   ia               automatico: usa o melhor cerebro ao alcance e abre o parise-core na pasta do projeto (os comandos parise-core e qwen abrem por aqui)
+#   ia "pedido"      idem, ja com o pedido:  parise-core "ligue o modo economia"  |  ia codigo "revise o script X"
+#   ia codigo        parise-core com os modelos GRATIS da nuvem (OmniRoute do PC, pela Tailscale ou pelo cabo): programar
 #   ia auditoria     idem, para revisar e cacar erro      |  ia rapido   idem, para resumo e tarefa curta
-#   ia pc            Matrix com o Llama 3B do Ollama do PC (fraco; so se a nuvem estiver fora)
+#   ia pc            parise-core com o Llama 3B do Ollama do PC (fraco; so se a nuvem estiver fora)
 #   ia chat          conversa SO NO CELULAR (modelo 1,5B se existir e couber: melhor e lento; "ia chat leve" = 0,5B, rapido e mais fraco; nao edita arquivo)
-#   ia local         Matrix com o modelo 0,5B do celular (MUITO lento: ~10 min na 1a resposta; prefira ia chat)
+#   ia local         parise-core com o modelo 0,5B do celular (MUITO lento: ~10 min na 1a resposta; prefira ia chat)
 #   ia tudo          liga TUDO ao alcance (nuvem + PC + modelo do celular) e abre o Qwen; la dentro, /model troca de cerebro (gasta ~0,5 GB)
 #   ia qwen "..."    o MELHOR Qwen gratis (3.8 de 27B, Groq) responde UMA pergunta curta, sem agente nem ferramentas (~4 mil tokens no maximo); tambem: echo texto | ia qwen  ou  cat arq | ia qwen "resuma" -
 #                    ATENCAO: o texto vai a um provedor externo (Groq): NUNCA mande nome, nota ou dado de aluno, nem senha ou chave
@@ -15,7 +15,7 @@
 # Reserva (PC fora do ar): se o OmniRoute do proprio celular estiver instalado e pronto (arquivo ~/.omniroute/pronto), o ia o liga sozinho em 127.0.0.1:20129 (~1 min, ~400 MB de RAM) e o desliga ao sair; sem o arquivo "pronto" ele nunca liga.
 # Troca automatica (06/11): com a reserva pronta, o Qwen fala com o CHAVEADOR em 127.0.0.1:20128: cada pedido vai ao OmniRoute do PC se ele
 #   responder e, se o PC cair NO MEIO da conversa, ao do celular (liga sozinho); quando o PC volta, volta a ele e desliga a reserva parada (5 min).
-#   O Matrix nao fecha. IA_CHAVEADOR=0 volta a ponte fixa (socat). Estado: ia status (linha "Cerebro agora").
+#   O parise-core nao fecha. IA_CHAVEADOR=0 volta a ponte fixa (socat). Estado: ia status (linha "Cerebro agora").
 # Depois do modo pode vir a pasta:  ia codigo "/storage/1A2B-3C4D/Projetos/Android Embeeded"
 # Sem pasta: usa a pasta atual (se nao for a inicial do Termux) ou a pasta do projeto no cartao SD.
 # O que o ia liga, ele desliga ao sair (IA_MANTER=1 deixa ligado). Variaveis: IA_PC_IP, IA_PROJETO, IA_MODELO_LOCAL, IA_QWEN_MODELO, IA_CONECTA (segundos para conectar ao PC; padrao 8), IA_GW_PORTA e IA_GW_MB (reserva: porta e limite de memoria do OmniRoute do celular).
@@ -69,7 +69,7 @@ mata() { # PID NOME: so desliga se o processo ainda for o que o ia abriu (o nume
 desliga_meus() { # ao sair: nao derruba a ponte se OUTRO Qwen Code esta aberto (outra sessao pode estar usando a mesma ponte sem te-la anotado)
   local m q; [ "${IA_MANTER:-0}" = 1 ] && return
   if [ ${#MEUS[@]} -gt 0 ] && q=$(qwen_aberto); then
-    echo "Deixei as pontes ligadas: ha outro Matrix aberto (processo $q). Para desligar depois: ia parar"; return
+    echo "Deixei as pontes ligadas: ha outro parise-core aberto (processo $q). Para desligar depois: ia parar"; return
   fi
   for m in "${MEUS[@]}"; do mata ${m%% *} ${m#* }; done
 }
@@ -114,7 +114,7 @@ gw_desliga() { # desliga so a reserva (servidor e ponte dela) anotada em $RUN/pi
 SELF=$(readlink -f "$0" 2>/dev/null || echo "$0")
 usa_chaveador() { [ "${IA_CHAVEADOR:-1}" != 0 ] && command -v python3 >/dev/null 2>&1 && gw_pronto; }
 chaveador_py() { cat <<'CHAVEADOR_FIM'
-# chaveador do Matrix (06/11): o Qwen fala sempre com 127.0.0.1:20128; cada pedido vai ao OmniRoute do PC
+# chaveador do parise-core (06/11): o Qwen fala sempre com 127.0.0.1:20128; cada pedido vai ao OmniRoute do PC
 # (pela Tailscale) se ele responder, senao ao OmniRoute do proprio celular (liga sozinho se preciso), trocando a
 # chave pela local. Testa o PC a cada CH_INTERVALO s e volta a ele quando volta; desliga a reserva ociosa.
 # So escuta em 127.0.0.1; nunca grava chave em log.
@@ -124,7 +124,7 @@ PC = os.environ.get("CH_PC", "100.64.0.1:20128")
 LOC = os.environ.get("CH_LOCAL", "127.0.0.1:20129")
 PORTA = int(os.environ.get("CH_PORTA", "20128"))
 CHAVE_ARQ = os.environ.get("CH_CHAVE_LOCAL", "")
-CHAVE_PC_ARQ = os.environ.get("CH_CHAVE_PC", "")   # ~/.qwen/.env: so quem tem a chave do Matrix passa (outro app do celular nao)
+CHAVE_PC_ARQ = os.environ.get("CH_CHAVE_PC", "")   # ~/.qwen/.env: so quem tem a chave do parise-core passa (outro app do celular nao)
 LIGA = os.environ.get("CH_LIGA", "")
 DESLIGA = os.environ.get("CH_DESLIGA", "")
 ESTADO = os.environ.get("CH_ESTADO", "")
@@ -159,8 +159,8 @@ def anota(via):
         except OSError:
             pass
     if antes is not None and AVISO:
-        msg = ("PC de volta: o Matrix usa o OmniRoute do PC" if via == "pc"
-               else "PC fora: o Matrix seguiu com o OmniRoute do celular")
+        msg = ("PC de volta: o parise-core usa o OmniRoute do PC" if via == "pc"
+               else "PC fora: o parise-core seguiu com o OmniRoute do celular")
         try:
             subprocess.Popen(shlex.split(AVISO) + [msg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError:
@@ -245,7 +245,7 @@ def autorizado(cab):
 
 
 def recusa(cw, cod, msg):
-    corpo = json.dumps({"error": {"message": "chaveador do Matrix: " + msg}}).encode()
+    corpo = json.dumps({"error": {"message": "chaveador do parise-core: " + msg}}).encode()
     cw.write(b"HTTP/1.1 " + cod + b"\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(corpo) + corpo)
 
 
@@ -300,7 +300,7 @@ async def atende(cr, cw):
     except Exception:
         cw.close()
         return
-    if not autorizado(cab):   # sem a chave do Matrix: nao repassa, nao liga a reserva, nao injeta a chave local
+    if not autorizado(cab):   # sem a chave do parise-core: nao repassa, nao liga a reserva, nao injeta a chave local
         recusa(cw, b"401 Unauthorized", "chave invalida")
         try:
             await cw.drain()
@@ -345,7 +345,7 @@ async def atende(cr, cw):
         sobe.cancel()
         return
     # a resposta tambem diz "Connection: close": sem isso o cliente (06/11, Qwen) reaproveita a conexao, o 2o pedido cai num
-    # canal que o servidor ja vai fechar e o Matrix acusa "400 (no body)" com o servidor tendo respondido 200
+    # canal que o servidor ja vai fechar e o parise-core acusa "400 (no body)" com o servidor tendo respondido 200
     cw.write(fecha_resposta(rcab))
     await asyncio.gather(sobe, cano(r, cw), return_exceptions=True)
 
@@ -389,7 +389,7 @@ CHAVEADOR_FIM
 }
 chaveador_liga() { # $1 = pc|local (por onde comeca). Escuta so em 127.0.0.1:20128; o que ele ligar da reserva, ele desliga
   chaveador_py > "$RUN/chaveador.py" || return 1
-  local av=""; command -v termux-notification >/dev/null 2>&1 && av="termux-notification --id matrix-cerebro --title Matrix --content"
+  local av=""; command -v termux-notification >/dev/null 2>&1 && av="termux-notification --id parise-core-cerebro --title parise-core --content"
   CH_PC="$PC_IP:20128" CH_LOCAL="127.0.0.1:$GW_PORTA" CH_PORTA=20128 CH_CHAVE_LOCAL="$GW_DADOS/cliente-local.key" CH_CHAVE_PC="$HOME/.qwen/.env" \
   CH_LIGA="bash '$SELF' reserva-ligar" CH_DESLIGA="bash '$SELF' reserva-desligar" CH_ESTADO="$RUN/cerebro" CH_INICIO="$1" \
   CH_CONECTA="$CONECTA" CH_AVISO="$av" python3 "$RUN/chaveador.py" >"$RUN/chaveador.log" 2>&1 &
@@ -506,7 +506,7 @@ status() {
   if [ -n "${IA_MODELO_LOCAL:-}" ]; then
     if [ -f "$IA_MODELO_LOCAL" ]; then ok "Celular (modelo de IA_MODELO_LOCAL): instalado$(local_ok && echo ' e ligado')"; else nao "Celular: falta $IA_MODELO_LOCAL (IA_MODELO_LOCAL)"; fi
   else
-    if [ -f "$MODELO_LEVE" ]; then ok "Celular, modelo 0,5B (rapido; usado pelo Matrix): instalado$(local_ok && echo ' e ligado')"; else nao "Celular: falta o modelo 0,5B ($MODELO_LEVE)"; fi
+    if [ -f "$MODELO_LEVE" ]; then ok "Celular, modelo 0,5B (rapido; usado pelo parise-core): instalado$(local_ok && echo ' e ligado')"; else nao "Celular: falta o modelo 0,5B ($MODELO_LEVE)"; fi
     if [ -f "$MODELO_GRANDE" ]; then ok "Celular, modelo 1,5B (melhor e lento; usado em ia chat): instalado - memoria livre $(mem_mb) MB, pede ${IA_MEM_MIN:-1300}"
     else nao "Celular: modelo 1,5B nao instalado (opcional, ~1,1 GB; veja o guia)"; fi
   fi
@@ -519,21 +519,21 @@ chat() {
   command -v llama-cli >/dev/null 2>&1 || { echo "Falta o llama-cli (pkg install llama-cpp)."; exit 1; }
   echo "Conversa com o modelo do celular ($(rotulo_modelo)). Escreva e aperte Enter; para sair: Ctrl+C."
   [ "$MODELO_LOCAL" = "$MODELO_GRANDE" ] && echo "(o 1,5B responde melhor, mas e lento: cerca de 2 palavras por segundo. Para o rapido e mais fraco: ia chat leve)"
-  local sys_="Voce e o MATRIX, a IA do Rafael no celular dele (agora sem internet, com o modelo do proprio celular). Personalidade: robo de missao com humor seco (humor 80%, sinceridade 100%), ironia de mordomo britanico e franqueza de medico cetico; nao bajula, faz rir com sarcasmo inteligente, mas resolve primeiro e nunca mente sobre fatos. Responda sempre em portugues do Brasil, de forma curta e clara. Para procurar algo que voce nao sabe, sugira: memoria buscar PALAVRAS."
+  local sys_="Voce e o PARISE-CORE, a IA do Rafael no celular dele (agora sem internet, com o modelo do proprio celular). Personalidade: robo de missao com humor seco (humor 80%, sinceridade 100%), ironia de mordomo britanico e franqueza de medico cetico; nao bajula, faz rir com sarcasmo inteligente, mas resolve primeiro e nunca mente sobre fatos. Responda sempre em portugues do Brasil, de forma curta e clara. Para procurar algo que voce nao sabe, sugira: memoria buscar PALAVRAS."
   local resumo=""
   command -v memoria >/dev/null 2>&1 && resumo=$(timeout 15 memoria resumo 2>/dev/null | head -c 1800)
   [ -n "$resumo" ] && sys_="$sys_ Fatos da memoria local: $resumo"
-  [ -n "${MATRIX:-}" ] && printf '%s' "$VERDE_M"
-  # Matrix aberto sem internet: uma vigia leve olha a cada minuto; quando a nuvem ou o PC voltam, avisa, e ao fechar a
-  # conversa (Ctrl+C) o Matrix reabre completo uma vez (IA_REEXEC impede laco se a rede oscilar).
+  [ -n "${PARISE_CORE:-}" ] && printf '%s' "$VERDE_M"
+  # parise-core aberto sem internet: uma vigia leve olha a cada minuto; quando a nuvem ou o PC voltam, avisa, e ao fechar a
+  # conversa (Ctrl+C) o parise-core reabre completo uma vez (IA_REEXEC impede laco se a rede oscilar).
   local volta="$RUN/internet-voltou" vigia="" rc
   rm -f "$volta"
-  if [ -n "${MATRIX:-}" ] && [ -z "${IA_REEXEC:-}" ]; then
+  if [ -n "${PARISE_CORE:-}" ] && [ -z "${IA_REEXEC:-}" ]; then
     ( while sleep "${IA_VIGIA_REDE:-60}"; do
         if { [ -n "$CHAVE" ] && nuvem_em "$PC_IP:20128"; } || pc_em "$PC_IP:11434"; then
           : > "$volta"
-          printf '\n%s\n' "[MATRIX] A internet voltou: feche a conversa (Ctrl+C) e eu volto completo."
-          command -v termux-notification >/dev/null 2>&1 && timeout 20 termux-notification --title MATRIX --content "A internet voltou: feche a conversa e eu volto completo." >/dev/null 2>&1
+          printf '\n%s\n' "[PARISE-CORE] A internet voltou: feche a conversa (Ctrl+C) e eu volto completo."
+          command -v termux-notification >/dev/null 2>&1 && timeout 20 termux-notification --title PARISE-CORE --content "A internet voltou: feche a conversa e eu volto completo." >/dev/null 2>&1
           break
         fi
       done ) &
@@ -544,8 +544,8 @@ chat() {
   [ -n "$vigia" ] && kill "$vigia" 2>/dev/null
   if [ -f "$volta" ] && [ -z "${IA_REEXEC:-}" ]; then
     rm -f "$volta"
-    echo "Reabrindo o Matrix completo..."
-    export MATRIX=1 IA_REEXEC=1
+    echo "Reabrindo o parise-core completo..."
+    export PARISE_CORE=1 IA_REEXEC=1
     exec "$BASH" "$0"
   fi
   exit $rc
@@ -633,8 +633,8 @@ fi
 [ "${1:-}" = "--" ] && shift
 
 VERDE_M=""; ESCURO_M=""; FIM_M=""
-matrix_abre() { # so quando chamado como `matrix` e num terminal: logo verde e as mensagens de conexao em verde
-  [ -n "${MATRIX:-}" ] && [ -t 1 ] || return 0
+parise_core_abre() { # so quando chamado como `parise-core` e num terminal: logo verde e as mensagens de conexao em verde
+  [ -n "${PARISE_CORE:-}" ] && [ -t 1 ] || return 0
   VERDE_M=$'\033[1;38;5;46m'; ESCURO_M=$'\033[38;5;250m'; FIM_M=$'\033[0m'   # so verde puro, cinza e branco (pedido do Rafael, 05/11)
   local b=$'\u2588' l   # o arquivo fica em ASCII (vai colado no guia): o bloco cheio nasce aqui; 33 colunas, cabe na tela em pe
   for l in ' #   #  ###  #####  ####  #  #   #' ' ## ##  #   #   #    #   # #   # # ' ' # # #  #####   #    ####  #    #  ' \
@@ -644,14 +644,14 @@ matrix_abre() { # so quando chamado como `matrix` e num terminal: logo verde e a
   printf '%s\n' "${ESCURO_M} agente do Galaxy A12 | pontes | IAs | memoria local${VERDE_M}"
   printf '%s' "$VERDE_M"
 }
-matrix_fecha() { [ -n "$FIM_M" ] && printf '%s' "$FIM_M"; return 0; }
-case "$MODO" in auto|codigo|auditoria|rapido|pc|local|tudo|chat) matrix_abre ;; esac
+parise_core_fecha() { [ -n "$FIM_M" ] && printf '%s' "$FIM_M"; return 0; }
+case "$MODO" in auto|codigo|auditoria|rapido|pc|local|tudo|chat) parise_core_abre ;; esac
 
 case "$MODO" in
   ajuda|-h|--help) sed -n '2,/^$/{/^#/s/^# \{0,1\}//p}' "$0"; exit 0 ;;
   status) status; exit 0 ;;
   parar) if [ "${1:-}" != --forca ] && Q=$(qwen_aberto); then
-           echo "Ha um Matrix aberto agora (processo $Q): desligar as pontes derrubaria a conversa dele."
+           echo "Ha um parise-core aberto agora (processo $Q): desligar as pontes derrubaria a conversa dele."
            echo "Saia dele primeiro (/quit) ou, se tiver certeza, rode: ia parar --forca"; exit 1
          fi
          desliga_tudo; echo "Desligado: pontes, OmniRoute do celular e modelo do celular."; exit 0 ;;
@@ -661,7 +661,7 @@ esac
 pega_chave
 [ -n "$PASTA_ARG" ] && [ ! -d "$PASTA_ARG" ] && { echo "A pasta nao existe: $PASTA_ARG"; exit 1; }
 PASTA=$(acha_pasta "$PASTA_ARG")
-command -v qwen >/dev/null 2>&1 || { echo "O motor do Matrix nao esta instalado neste Termux (peca ao Claude do PC)."; exit 1; }
+command -v qwen >/dev/null 2>&1 || { echo "O motor do parise-core nao esta instalado neste Termux (peca ao Claude do PC)."; exit 1; }
 trap desliga_meus EXIT
 
 ID=""
@@ -678,21 +678,21 @@ case "$MODO" in
     garante_pc || { echo "O Ollama do PC nao respondeu. Abra a porta dele no PC (guia, passo C) ou use o cabo. Veja: ia status"; exit 1; }
     ID=llama3.2-32k ;;
   local)
-    echo "Aviso: com o modelo do celular a 1a resposta do Matrix leva ~10 minutos. Para conversar, use: ia chat"
+    echo "Aviso: com o modelo do celular a 1a resposta do parise-core leva ~10 minutos. Para conversar, use: ia chat"
     garante_local || exit 1; ID=qwen ;;
   tudo)
     NUV=0; PCK=0; LOC=0
     [ -n "$CHAVE" ] && garante_nuvem && NUV=1
     garante_pc && PCK=1
     garante_local && LOC=1; VIA=""
-    echo "Ligado (1 = sim): nuvem=$NUV pc=$PCK modelo-do-celular=$LOC. Dentro do Matrix, /model troca de cerebro."
+    echo "Ligado (1 = sim): nuvem=$NUV pc=$PCK modelo-do-celular=$LOC. Dentro do parise-core, /model troca de cerebro."
     if [ $NUV = 1 ]; then ID=codigo; elif [ $PCK = 1 ]; then ID=llama3.2-32k; elif [ $LOC = 1 ]; then ID=qwen
     else echo "Nada ligou (veja: ia status)."; exit 1; fi ;;
 esac
 
 [ -n "$VIA" ] && echo "Cerebro: $ID (via $VIA)"
-[ -n "${MATRIX:-}" ] && command -v memoria >/dev/null 2>&1 && echo "Memoria local: $(timeout 10 memoria status 2>/dev/null | head -1 | cut -c1-90)"
-matrix_fecha
+[ -n "${PARISE_CORE:-}" ] && command -v memoria >/dev/null 2>&1 && echo "Memoria local: $(timeout 10 memoria status 2>/dev/null | head -1 | cut -c1-90)"
+parise_core_fecha
 [ -n "$CHAVE" ] && export OMNIROUTE_API_KEY="$CHAVE"
 if [ "$ID" = llama3.2-32k ]; then
   echo "Modelo pequeno (3B) do PC: so para tarefa curta. Aquecendo (a 1a resposta leva alguns minutos)..."
@@ -704,11 +704,11 @@ cd "$PASTA" || { echo "Nao consegui entrar em: $PASTA"; exit 1; }
 MCP_OFF=()
 case "$ID" in
   codigo|auditoria|rapido)
-    if tem_token && ponte_ok; then echo "Ponte do PC ligada: o Matrix le o projeto ao vivo e as skills do PC; recados: caixa sincronizar"
+    if tem_token && ponte_ok; then echo "Ponte do PC ligada: o parise-core le o projeto ao vivo e as skills do PC; recados: caixa sincronizar"
     else MCP_OFF+=(--disable-mcp-server ponte-pc); fi ;;
   *) MCP_OFF+=(--disable-mcp-server ponte-pc --disable-mcp-server exa) ;;
 esac
-echo "Abrindo o Matrix em: $PWD"
+echo "Abrindo o parise-core em: $PWD"
 echo "(dentro dele: /help ajuda, Esc interrompe, /quit sai)"
 # Sem perguntar (pedido do Rafael, 04/11: "total autorizacao ... sem ficar interrompendo"): tools.approvalMode = yolo no
 # ~/.qwen/settings.json (o instalador poe); o que esta em deny segue bloqueado (o Qwen confere deny antes do modo).

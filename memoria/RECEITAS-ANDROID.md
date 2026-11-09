@@ -1,6 +1,6 @@
-# RECEITAS-ANDROID: como o Matrix opera o Galaxy A12 (Android 12, One UI 4)
+# RECEITAS-ANDROID: como o parise-core opera o Galaxy A12 (Android 12, One UI 4)
 
-O Claude escreve; chega ao Matrix como `pc-receitas-android` e vale sem internet (`memoria buscar ...`).
+O Claude escreve; chega ao parise-core como `pc-receitas-android` e vale sem internet (`memoria buscar ...`).
 Tudo pelo `cel` (porta 5555 do adb: qualquer rede). Marcas: [Conferido 05/11] = o comando existe neste aparelho
 (consulta, sem mudar nada); [Sem conferir] = documentação do Android, testar antes de confiar.
 
@@ -79,24 +79,24 @@ só grava VISÍVEL; por isso o `cel viagem` o abre numa JANELA FLUTUANTE (pop-up
 - 06/11 (teste de estresse do Rafael: ScreenStream transmitindo, hotspot ligado e troca para o Wi-Fi da SEDUC): uns 100 s antes, netd, o
   serviço de ancoragem e outros tinham acabado de reiniciar (o Android caiu e recomeçou); depois ficaram parados esperando memória/disco e o
   driver de tela preso numa trava [Provável: registro do kernel]. Sem root não há conserto; diminui o risco: memória folgada antes de estressar
-  (fechar o Organic Maps, 572 MB, e o Matrix), não trocar de Wi-Fi com hotspot + ScreenStream ligados.
+  (fechar o Organic Maps, 572 MB, e o parise-core), não trocar de Wi-Fi com hotspot + ScreenStream ligados.
 
-## Matrix em potência máxima: frase → ação, troca de cérebro e RAM [Provado no A12 em 06/11 ~16:30–17:30]
+## parise-core em potência máxima: frase → ação, troca de cérebro e RAM [Provado no A12 em 06/11 ~16:30–17:30]
 - **Frase do jeito dele → comando:** `cel faz "frase"` (normaliza acento e caixa e roda o comando certo; `--lista` mostra as frases;
   `--mostra` só diz o que faria). "falta um detalhe" (saída 3) = perguntar só esse detalhe; "Nao reconheci" (saída 4) = procurar no
-  Catálogo do QWEN.md. É a REGRA 1 no topo do QWEN.md: o Matrix roda `cel faz` antes de tudo. Conferido no aparelho: "libera a memoria
+  Catálogo do QWEN.md. É a REGRA 1 no topo do QWEN.md: o parise-core roda `cel faz` antes de tudo. Conferido no aparelho: "libera a memoria
   do celular" → `cel otimizar`; "grava a viagem" → `cel viagem iniciar`. 27 frases nos testes.
-- **Cérebro que troca sozinho (PC ↔ celular):** com a reserva pronta, o `ia`/`matrix` põe o CHAVEADOR em 127.0.0.1:20128 (no lugar da
+- **Cérebro que troca sozinho (PC ↔ celular):** com a reserva pronta, o `ia`/`parise-core` põe o CHAVEADOR em 127.0.0.1:20128 (no lugar da
   ponte fixa). Cada pedido vai ao OmniRoute do PC se ele responder; se o PC cair NO MEIO da conversa, vai ao OmniRoute do celular
-  (o chaveador o liga sozinho, troca a chave pela local, avisa na barra "PC fora: o Matrix seguiu com o OmniRoute do celular"); quando o
-  PC volta, volta a ele e desliga a reserva parada há 5 min. O Matrix não fecha. Ver qual está valendo: `ia status` (linha "Cerebro agora").
+  (o chaveador o liga sozinho, troca a chave pela local, avisa na barra "PC fora: o parise-core seguiu com o OmniRoute do celular"); quando o
+  PC volta, volta a ele e desliga a reserva parada há 5 min. O parise-core não fecha. Ver qual está valendo: `ia status` (linha "Cerebro agora").
   Medido no A12: PC no ar = rota ao PC; "PC fora" (porta fechada) = 1º pedido respondido pela reserva em 77 s (a reserva sobe em ~70 s,
   precisa de ~800 MB livres: se recusar, `cel otimizar`); ao fechar, chaveador e reserva saem sozinhos. Desligar a troca: `IA_CHAVEADOR=0 ia`.
-  Segurança: o chaveador só atende quem manda a chave do Matrix (a do `~/.qwen/.env`, comparada em tempo constante); outro app do celular
+  Segurança: o chaveador só atende quem manda a chave do parise-core (a do `~/.qwen/.env`, comparada em tempo constante); outro app do celular
   que abra a 20128 recebe 401, sem repasse e sem ligar a reserva (provado no A12: certa 200, errada 401, sem chave 401).
   Por que a reserva não fica ligada SEMPRE: custa ~400 MB de RAM o tempo todo (de 3,8 GB), contra o pedido de RAM livre; ela liga sozinha
   quando precisa e a vigia do chaveador a liga assim que o PC some, antes do próximo pedido.
-- **Um processo só:** o Matrix abria dois `node` (um "supervisor" de ~30 MB); desde 06/11 `QWEN_CODE_NO_RELAUNCH=true` no `ia`
+- **Um processo só:** o parise-core abria dois `node` (um "supervisor" de ~30 MB); desde 06/11 `QWEN_CODE_NO_RELAUNCH=true` no `ia`
   (no Linux o Qwen 0.26.5 já liga o `gc` no próprio processo; conferido no `cli-entry.js`). Provado: um processo. `IA_RELANCAR=1` volta.
 - **Liberar RAM e CPU:** `cel otimizar` (fecha com `am kill` os apps PARADOS em cache, que continuam recebendo avisos; `force-stop` só nos
   utilitários parados (CPU Info, Binary Eye, LocalSend); nada visível, nada com serviço, nenhum `com.android.*`, gms,
@@ -130,8 +130,8 @@ só grava VISÍVEL; por isso o `cel viagem` o abre numa JANELA FLUTUANTE (pop-up
 - Lanterna: `cel lanterna ligar` / `cel lanterna desligar` (Termux:API; funciona sem a depuração sem fio). Não procure outra receita.
 - Rotação: `cel sh "settings put system accelerometer_rotation 1"` (1 = automática; o Rafael usa automática).
 - Escurecer sem bloquear: `cel tela apagar` / `cel tela acender`. NUNCA `keyevent 26`/`223` nem `SurfaceControl` (regras do projeto).
-- Foto da tela: `cel sh "screencap -p /sdcard/Pictures/Screenshots/matrix-$(date +%H%M%S).png"`.
-- Gravar a tela: `cel sh "screenrecord --time-limit 30 /sdcard/Movies/matrix.mp4"` (até 180 s).
+- Foto da tela: `cel sh "screencap -p /sdcard/Pictures/Screenshots/parise-core-$(date +%H%M%S).png"`.
+- Gravar a tela: `cel sh "screenrecord --time-limit 30 /sdcard/Movies/parise-core.mp4"` (até 180 s).
 
 ## Bateria, rede e localização
 - Economia de energia: `cel sh "settings put global low_power 1"` (0 desliga) [Sem conferir o efeito na One UI; `cmd power set-mode` também existe].
@@ -159,9 +159,9 @@ só grava VISÍVEL; por isso o `cel viagem` o abre numa JANELA FLUTUANTE (pop-up
 
 ## Apps e arquivos
 - Lista: `cel apps texto`. Abrir: `cel abrir-app PACOTE`. Fechar à força: `cel sh "am force-stop PACOTE"` (reversível: só fecha).
-- Instalar: peça ao Claude (F-Droid com hash conferido); o Matrix não instala APK por conta própria. Desinstalar: nunca (bloqueado).
+- Instalar: peça ao Claude (F-Droid com hash conferido); o parise-core não instala APK por conta própria. Desinstalar: nunca (bloqueado).
 - Procurar arquivo: `cel procurar TEXTO`; nos projetos do cartão: `memoria buscar TEXTO` (o índice tem o texto de todos os arquivos).
-- Cartão SD: `/storage/1A2B-3C4D` (exFAT, 477 GB); a memória do Matrix fica em `Android/data/com.termux/files/matrix-memoria`.
+- Cartão SD: `/storage/1A2B-3C4D` (exFAT, 477 GB); a memória do parise-core fica em `Android/data/com.termux/files/parise-core-memoria`.
 
 ## Compartilhar com qualquer pessoa, de qualquer celular ou PC: `link` [Provado 05/11 ~21:55]
 Para quê: mandar a TELA, um ARQUIVO ou um APP para quem não tem nenhum app (celular de aluno nos dados móveis, smart TV,

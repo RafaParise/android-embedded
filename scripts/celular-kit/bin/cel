@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # cel - a mao do Qwen (e do Rafael) no proprio celular, sem root e sem PC: o adb do Termux ligado ao proprio aparelho pela depuracao sem fio.
-#   cel faz "frase"                 o Rafael (ou o Matrix) diz o que quer com as palavras dele e o cel roda o comando certo (--lista; --mostra so diz)
+#   cel faz "frase"                 o Rafael (ou o parise-core) diz o que quer com as palavras dele e o cel roda o comando certo (--lista; --mostra so diz)
 #   cel status                      o que esta ligado e se a conexao com o sistema esta de pe
 #   cel conectar                    liga a conexao (religa a depuracao sem fio se o Termux tiver a permissao); `cel parear PORTA CODIGO` so na 1a vez
 #   cel wifi ligar|desligar|reiniciar · cel bluetooth ligar|desligar · cel dados ligar|desligar · cel aviao ligar|desligar
@@ -160,7 +160,7 @@ conecta() {
 
 TELA_CACHE="$HOME/.cache/cel-tela.json"
 # Le a arvore da tela (uiautomator) e guarda a lista em TELA_CACHE. E-mail e numero longo (telefone, CPF) saem mascarados:
-# o que o Matrix le pode ir a um modelo da nuvem. Nada disso vai para a memoria.
+# o que o parise-core le pode ir a um modelo da nuvem. Nada disso vai para a memoria.
 PY_TELA=$(cat <<'@@PY@@'
 import json, re, sys, xml.etree.ElementTree as ET
 cache, filtro = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else "").lower()
@@ -292,7 +292,7 @@ abre() { # sem conexao tambem funciona: o Termux pode abrir telas sozinho
   am start -a "$1" >/dev/null 2>&1
 }
 
-sem_internet_recusa() { # 06/11: o Matrix desligou Wi-Fi E dados, perdeu o proprio cerebro (modelo na nuvem) e nao religou
+sem_internet_recusa() { # 06/11: o parise-core desligou Wi-Fi E dados, perdeu o proprio cerebro (modelo na nuvem) e nao religou
   echo "Recusado: assim o celular fica SEM internet e eu (a IA) penso pela internet: pararia no meio e nao conseguiria religar."
   echo "Se e isso mesmo, o Rafael faz pelo painel rapido (deslizar de cima para baixo). Para trocar de rede, desligue uma de cada vez com a outra ligada."
   exit 3
@@ -540,7 +540,7 @@ case "${1:-status}" in
         : > "$VG/ligada"; rm -f "$VG/retomadas"
         nohup bash "$SELF" viagem vigiar >/dev/null 2>&1 </dev/null &
         echo $! > "$VG/vigia.pid"
-        aviso viagem "Gravando a viagem" "Parar: este botao (ou o Matrix). Se o Open Camera fechar sozinho, volta. Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
+        aviso viagem "Gravando a viagem" "Parar: este botao (ou o parise-core). Se o Open Camera fechar sozinho, volta. Calor so gera aviso." --ongoing --icon videocam --button1 "Parar" --button1-action "bash $SELF viagem parar"
         echo "Gravando a viagem no cartao ($PASTA), Open Camera na janela do canto e o mapa na tela; partes de 20 min."
         echo "Parar: botao Parar do aviso 'Gravando a viagem' ou cel viagem parar. Se o Open Camera fechar sozinho (calor), a gravacao VOLTA."
         echo "Calor: so AVISO. O sistema da Samsung pode fechar a camera no calor (sem root nao sai): se fechar, a camera volta sozinha (~30 s) e o que ja foi gravado fica salvo."

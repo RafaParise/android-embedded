@@ -427,7 +427,7 @@ def test_enviar_pc_recusa_fora_do_armazenamento_e_nome_perigoso(cel):
 
 
 def test_nunca_deixa_o_celular_sem_internet(cel):
-    """06/11: o Matrix desligou Wi-Fi e dados, perdeu o modelo da nuvem e nao conseguiu religar."""
+    """06/11: o parise-core desligou Wi-Fi e dados, perdeu o modelo da nuvem e nao conseguiu religar."""
     _conectado(cel)
     (cel.dir / "sem_dados").write_text("")
     rc, s = cel.roda("wifi", "desligar")
@@ -637,7 +637,7 @@ def test_otimizar_com_tudo_nao_encerra_o_screenstream_se_o_link_esta_no_ar(cel):
 
 FRASES = [
     ("Grava a viagem", "cel viagem iniciar"),
-    ("matrix, grava o caminho enquanto uso o mapa por favor", "cel viagem iniciar"),
+    ("parise_core, grava o caminho enquanto uso o mapa por favor", "cel viagem iniciar"),
     ("liga a câmera do carro", "cel viagem iniciar"),
     ("PARA A GRAVAÇÃO", "cel viagem parar"),
     ("terminei a viagem", "cel viagem parar"),

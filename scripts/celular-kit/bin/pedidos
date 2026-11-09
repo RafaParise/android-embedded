@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""pedidos: a fila dos pedidos do Rafael ao Matrix (pedido dele, 05/11: "cada requisicao organizada, sem atrapalhar o que
-esta fazendo, na melhor ordem, e revisar para nao faltar nada"). Mora junto da memoria do Matrix (cartao SD ou reserva).
+"""pedidos: a fila dos pedidos do Rafael ao parise-core (pedido dele, 05/11: "cada requisicao organizada, sem atrapalhar o que
+esta fazendo, na melhor ordem, e revisar para nao faltar nada"). Mora junto da memoria do parise-core (cartao SD ou reserva).
 
   pedidos                         abertos, na ordem de fazer (urgentes primeiro, depois os mais antigos)
   pedidos novo "texto" [--urgente]  registra ANTES de comecar (recusa senha, chave, e-mail, CPF e dado de aluno)

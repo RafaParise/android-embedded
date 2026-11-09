@@ -94,9 +94,9 @@ ACOES_PC = {
     "ia-pc-ligar": ("liga no PC o OmniRoute, o Ollama e a ponte que o celular usa (a Tailscale o Rafael conecta)", "ia-do-pc.ps1"),
     "ia-pc-status": ("so confere a IA do PC, sem ligar nada", "ia-do-pc.ps1", "-SoVerificar"),
     "depuracao-sem-fio-ligar": ("religa a Depuracao por Wi-Fi do celular pelo cabo (o Android a desliga ao trocar de rede ou reiniciar); precisa do cabo", "depuracao-sem-fio.py", "ligar"),
-    "depuracao-5555-ligar": ("liga o adb pela porta 5555 do celular (o Matrix e o PC o comandam em qualquer rede, ate em dados moveis; cai ao reiniciar); precisa do cabo", "depuracao-sem-fio.py", "porta5555"),
+    "depuracao-5555-ligar": ("liga o adb pela porta 5555 do celular (o parise-core e o PC o comandam em qualquer rede, ate em dados moveis; cai ao reiniciar); precisa do cabo", "depuracao-sem-fio.py", "porta5555"),
     "depuracao-sem-fio-status": ("diz se a Depuracao por Wi-Fi do celular esta ligada (pelo cabo)", "depuracao-sem-fio.py", "status"),
-    "ia-pc-ollama-abrir": ("abre a porta do Ollama do PC SO para a tailnet (sem senha), para o Matrix usar o modelo do PC sem a nuvem", "ia-do-pc.ps1", "-AbrirOllama"),
+    "ia-pc-ollama-abrir": ("abre a porta do Ollama do PC SO para a tailnet (sem senha), para o parise-core usar o modelo do PC sem a nuvem", "ia-do-pc.ps1", "-AbrirOllama"),
     "ia-pc-ollama-fechar": ("fecha de novo a porta do Ollama do PC", "ia-do-pc.ps1", "-FecharOllama"),
     # Celular no OBS do PC (05/11): webcam da aula, gravacao e live, por cabo, Wi-Fi ou dados moveis (o script acha o caminho)
     "obs-camera-ligar": ("camera traseira do celular vira a OBS Virtual Camera do PC (aula, Meet, Teams); camera virtual liga sozinha", "webcam-celular.py", "iniciar"),
@@ -132,9 +132,9 @@ DOCS_MEMORIA = ["CLAUDE.md"] + [f"memoria/{n}.md" for n in (
     "ESTADO", "DISPOSITIVO", "DECISOES", "INTEGRACAO-A12", "ESPECIALISTA-A12", "RADAR-DESEMPENHO", "VPN-SEMPRE-ATIVA", "ANTIVIRUS",
     "TELA-APAGADA", "QWEN-CELULAR", "PROTOCOLO-IAS", "ECOSSISTEMA-IA", "LINUX-A12", "CONTROLES-GAMESIR", "OBS-ESTUDIO",
     "ADGUARD-PC", "COPIA-E-RESTAURAR", "MAPAS-LUGARES", "GUIA-IA-NO-CELULAR", "PLAY-PARA-FONTE", "WEBCAM-E-RECUPERACAO",
-    "PLANO-MATRIX", "CONFERENCIA-PEDIDOS", "ACESSO-REMOTO", "LICOES-MATRIX", "RECEITAS-ANDROID", "VOZ-OFFLINE", "MATRIX-ALINHAMENTO")]
-DOCS_MATRIX_CELULAR = ["memoria/BLUEPRINT-A12.md", "memoria/PLANO.md"]  # em C:\Projetos\matrix-celular (lista fechada)
-PASTAS_FORA_MEMORIA = {"qwen-celular", "hermes-trabalho", "_matrix-trabalho", "node_modules", ".git", "backups", "backup", "diagnostico", "venv", ".venv"}
+    "PLANO-PARISE-CORE", "CONFERENCIA-PEDIDOS", "ACESSO-REMOTO", "LICOES-PARISE-CORE", "RECEITAS-ANDROID", "VOZ-OFFLINE", "PARISE-CORE-ALINHAMENTO")]
+DOCS_PARISE_CORE_ANDROID = ["memoria/BLUEPRINT-A12.md", "memoria/PLANO.md"]  # em C:\Projetos\parise-core-android (lista fechada)
+PASTAS_FORA_MEMORIA = {"qwen-celular", "hermes-trabalho", "_parise_core-trabalho", "node_modules", ".git", "backups", "backup", "diagnostico", "venv", ".venv"}
 _RE_ALUNO = re.compile(r"(?i)mapao|mapão|aluno|alunos|boletim|notas[ _-]?(finais|bimestr)|\bRA\s*[:=]?\s*\d{6,}")
 _RE_PESSOAL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+|\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|\bRA\s*[:=]?\s*\d{6,}")  # linhas com isso saem
 MAX_DOC_MEMORIA = 200_000
@@ -330,24 +330,24 @@ junta("deny", ["Bash(pkg upgrade*)", "Bash(pkg uninstall*)", "Bash(pkg remove*)"
                "Bash(cel sh pm uninstall*)", "Bash(cel sh pm move*)", "Bash(cel sh pm clear*)", "Bash(cel sh pm disable*)",
                "Bash(cel sh cmd package uninstall*)", "Bash(cel sh sm *)", "Bash(cel sh reboot*)", "Bash(cel sh wipe*)",
                "Bash(cel sh rm -rf*)", "Bash(cel sh input keyevent 26*)", "Bash(cel sh input keyevent 223*)", "Bash(cel sh svc power*)",
-               # 05/11: o Matrix pos o microfone em "sempre" sem pedido e o JBL ficou com som de ligacao
+               # 05/11: o parise-core pos o microfone em "sempre" sem pedido e o JBL ficou com som de ligacao
                "Bash(cel microfone sempre*)", "Bash(cel microfone desligado*)", "Bash(cel sh *mic-bt.modo*)"])
 dados["permissions"] = regras
 ferr = dados.get("tools") if isinstance(dados.get("tools"), dict) else {}
 ferr["approvalMode"] = "yolo"  # sem perguntar (pedido do Rafael, 04/11); o deny acima segue bloqueando
 dados["tools"] = ferr
-# MATRIX (pedido do Rafael, 04/11): o Qwen do celular se chama Matrix; verde puro sobre preto, profissional.
+# PARISE-CORE (pedido do Rafael, 04/11): o Qwen do celular se chama parise-core; verde puro sobre preto, profissional.
 ui = dados.get("ui") if isinstance(dados.get("ui"), dict) else {}
 temas = ui.get("customThemes") if isinstance(ui.get("customThemes"), dict) else {}
-temas["Matrix"] = {  # so verde puro, cinza e branco (pedido do Rafael, 05/11: "o verde escuro quase nao da para ver")
-    "type": "custom", "name": "Matrix", "Background": "#000000", "Foreground": "#00FF41", "LightBlue": "#00FF41",
+temas["parise-core"] = {  # so verde puro, cinza e branco (pedido do Rafael, 05/11: "o verde escuro quase nao da para ver")
+    "type": "custom", "name": "parise-core", "Background": "#000000", "Foreground": "#00FF41", "LightBlue": "#00FF41",
     "AccentBlue": "#00FF41", "AccentPurple": "#FFFFFF", "AccentCyan": "#FFFFFF", "AccentGreen": "#00FF41", "AccentYellow": "#FFFFFF",
     "AccentRed": "#FFFFFF", "AccentYellowDim": "#B0B0B0", "AccentRedDim": "#B0B0B0", "DiffAdded": "#3A3A3A", "DiffRemoved": "#3A3A3A",
     "Comment": "#B0B0B0", "Gray": "#909090", "GradientColors": ["#00FF41", "#FFFFFF"],
 }
 ui["customThemes"] = temas
-ui["theme"] = "Matrix"
-ui["customBannerTitle"] = "MATRIX"
+ui["theme"] = "parise-core"
+ui["customBannerTitle"] = "PARISE-CORE"
 ui["customBannerSubtitle"] = "agente do Galaxy A12 | humor 80% | sinceridade 100% | memória local"
 ui["customAsciiArt"] = {
     "small": "█▀▄▀█ ▄▀█ ▀█▀ █▀█ █ ▀▄▀\n█ ▀ █ █▀█  █  █▀▄ █ █ █",
@@ -355,7 +355,7 @@ ui["customAsciiArt"] = {
               "██╔████╔██║███████║   ██║   ██████╔╝██║ ╚███╔╝ \n██║╚██╔╝██║██╔══██║   ██║   ██╔══██╗██║ ██╔██╗ \n"
               "██║ ╚═╝ ██║██║  ██║   ██║   ██║  ██║██║██╔╝ ██╗\n╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝"),
 }
-ui["customWittyPhrases"] = [  # personalidade do Matrix (robo de missao + mordomo + medico cetico); frases originais
+ui["customWittyPhrases"] = [  # personalidade do parise-core (robo de missao + mordomo + medico cetico); frases originais
     "Humor em 80%. Paciência em análise...", "Lendo seus logs. Você não vai gostar...", "Diagnóstico provável: erro humano. Confirmando...",
     "Consultando o manual que você não leu...", "Polindo a prataria enquanto o Wi-Fi decide se coopera...",
     "Separando o que você pediu do que você quis dizer...", "Procurando o botão de desfazer da sua última ideia...",
@@ -449,22 +449,22 @@ ponte_instalar() {
   [ -e "$A/QWEN.md" ] || { [ -e "$Q/QWEN.md" ] && cp -p "$Q/QWEN.md" "$A/QWEN.md"; }
   mv -f "$Q/.QWEN.md.novo" "$Q/QWEN.md" && echo "  [ok]  ~/.qwen/QWEN.md atualizado (instrucoes do Qwen)" || { echo "  [--]  nao consegui atualizar o QWEN.md"; rm -f "$Q/.QWEN.md.novo"; erro=1; }
   mkdir -p "$HOME/kit/scripts-qwen"
-  printf '%s\n' '#!/data/data/com.termux/files/usr/bin/bash' '# matrix: a IA do celular (Qwen Code com tema Matrix, pontes, modelo e memoria local), em qualquer pasta' \
-    'MATRIX=1 exec bash "${0%/*}/ia" "$@"' > "$B/matrix" && chmod 755 "$B/matrix" && echo "  [ok]  comando matrix (a IA completa) em ~/bin" || { echo "  [--]  nao consegui criar o comando matrix"; erro=1; }
+  printf '%s\n' '#!/data/data/com.termux/files/usr/bin/bash' '# parise_core: a IA do celular (Qwen Code com tema parise-core, pontes, modelo e memoria local), em qualquer pasta' \
+    'PARISE-CORE=1 exec bash "${0%/*}/ia" "$@"' > "$B/parise-core" && chmod 755 "$B/parise-core" && echo "  [ok]  comando parise_core (a IA completa) em ~/bin" || { echo "  [--]  nao consegui criar o comando parise-core"; erro=1; }
   C="$HOME/.termux/colors.properties"
-  if grep -q "^# matrix-kit v2" "$C" 2>/dev/null; then echo "  [ok]  cores Matrix do Termux ja aplicadas"
-  else mkdir -p "$HOME/.termux" "$A"; [ -e "$C" ] && [ ! -e "$A/colors.properties" ] && ! grep -q "^# matrix-kit" "$C" && cp -p "$C" "$A/colors.properties"
-    printf '%s\n' '# matrix-kit v2: so verde puro, cinza e branco sobre preto (copia das cores antigas em ~/.qwen/antes-da-ponte/colors.properties)' \
+  if grep -q "^# parise-core-kit v2" "$C" 2>/dev/null; then echo "  [ok]  cores parise-core do Termux ja aplicadas"
+  else mkdir -p "$HOME/.termux" "$A"; [ -e "$C" ] && [ ! -e "$A/colors.properties" ] && ! grep -q "^# parise-core-kit" "$C" && cp -p "$C" "$A/colors.properties"
+    printf '%s\n' '# parise-core-kit v2: so verde puro, cinza e branco sobre preto (copia das cores antigas em ~/.qwen/antes-da-ponte/colors.properties)' \
       'background=#000000' 'foreground=#00FF41' 'cursor=#00FF41' 'color0=#000000' 'color1=#FFFFFF' 'color2=#00FF41' 'color3=#FFFFFF' \
       'color4=#00FF41' 'color5=#FFFFFF' 'color6=#00FF41' 'color7=#C0C0C0' 'color8=#808080' 'color9=#FFFFFF' 'color10=#00FF41' \
       'color11=#FFFFFF' 'color12=#00FF41' 'color13=#FFFFFF' 'color14=#00FF41' 'color15=#FFFFFF' > "$C" \
-      && { command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; echo "  [ok]  Termux em verde e preto (Matrix)"; } \
+      && { command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; echo "  [ok]  Termux em verde e preto (parise-core)"; } \
       || { echo "  [--]  nao consegui aplicar as cores do Termux"; erro=1; }
   fi
-  if grep -q "^alias qwen='matrix'" "$HOME/.bashrc" 2>/dev/null; then echo "  [ok]  qwen e matrix abrem a IA completa"
+  if grep -q "^alias qwen='parise-core'" "$HOME/.bashrc" 2>/dev/null; then echo "  [ok]  qwen e parise-core abrem a IA completa"
   else { [ ! -f "$HOME/.bashrc" ] || { grep -v "^alias qwen=" "$HOME/.bashrc" > "$HOME/.bashrc.novo"; mv -f "$HOME/.bashrc.novo" "$HOME/.bashrc"; }; } \
-    && printf '%s\n' "alias qwen='matrix'  # kit da ponte: qwen e matrix abrem a IA completa em qualquer pasta" >> "$HOME/.bashrc" \
-    && echo "  [ok]  qwen agora abre o matrix (vale no proximo Termux aberto)" || { echo "  [--]  nao consegui criar o atalho qwen"; erro=1; }; fi
+    && printf '%s\n' "alias qwen='parise-core'  # kit da ponte: qwen e parise-core abrem a IA completa em qualquer pasta" >> "$HOME/.bashrc" \
+    && echo "  [ok]  qwen agora abre o parise_core (vale no proximo Termux aberto)" || { echo "  [--]  nao consegui criar o atalho qwen"; erro=1; }; fi
   [ -e "$A/settings.json" ] || { [ -e "$Q/settings.json" ] && cp -p "$Q/settings.json" "$A/settings.json"; }
   "$PY" - "@@URL@@" <<'@@FIM_PY@@'
 @@MESCLA_PY@@
@@ -492,13 +492,13 @@ def _carrega_navegador():
 
 
 def _carrega_projetos():
-    """O `projetos.py` do Matrix Windows (07/11/2026): a lista fechada dos projetos do Rafael, os limites escritos pelo Claude
-    Code e o indice com todo o texto de cada um. Uma fonte so: o Matrix Celular busca e le pela ponte o MESMO indice que o
-    Matrix Windows usa no PC, com as mesmas recusas (segredo, aluno, binario, arquivo que o git nao acompanha)."""
-    caminho = Path(os.environ.get("PONTE_PROJETOS_PY", r"C:\Projetos\matrix-windows\bin\projetos.py"))
+    """O `projetos.py` do parise-core-windows (07/11/2026): a lista fechada dos projetos do Rafael, os limites escritos pelo Claude
+    Code e o indice com todo o texto de cada um. Uma fonte so: o parise-core-android busca e le pela ponte o MESMO indice que o
+    parise-core-windows usa no PC, com as mesmas recusas (segredo, aluno, binario, arquivo que o git nao acompanha)."""
+    caminho = Path(os.environ.get("PONTE_PROJETOS_PY", r"C:\Projetos\parise-core-windows\bin\projetos.py"))
     if not caminho.is_file():
-        raise ErroPonte(503, "o indice dos projetos nao esta neste PC (falta matrix-windows\\bin\\projetos.py)")
-    spec = importlib.util.spec_from_file_location("projetos_do_matrix", caminho)
+        raise ErroPonte(503, "o indice dos projetos nao esta neste PC (falta parise-core-windows\\bin\\projetos.py)")
+    spec = importlib.util.spec_from_file_location("projetos_do_parise_core", caminho)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -522,7 +522,7 @@ class Ponte:
         self._acoes_recentes = []
         self._executa = subprocess.run  # os testes trocam por um falso
         self.pasta_projetos = Path(os.environ.get("PONTE_PROJETOS", r"C:\Projetos"))  # so os LEIA-ME de cada projeto vao a memoria do Qwen
-        self._projetos = None  # o projetos.py do Matrix Windows, carregado na primeira consulta (os testes trocam por um falso)
+        self._projetos = None  # o projetos.py do parise-core-windows, carregado na primeira consulta (os testes trocam por um falso)
         for sub in ("entrada", "saida", "retorno"):
             (self.base / sub).mkdir(parents=True, exist_ok=True)
 
@@ -552,8 +552,8 @@ class Ponte:
 
         for rel in DOCS_MEMORIA:
             poe("pc-" + re.sub(r"[^a-z0-9]+", "-", Path(rel).stem.lower()).strip("-") + ".md", self.projeto / rel)
-        for rel in DOCS_MATRIX_CELULAR:  # o que e do Matrix mora no projeto dele (pedido do Rafael, 05/11): blueprint e plano
-            poe("pc-matrix-" + re.sub(r"[^a-z0-9]+", "-", Path(rel).stem.lower()).strip("-") + ".md", self.pasta_projetos / "matrix-celular" / rel)
+        for rel in DOCS_PARISE_CORE_ANDROID:  # o que e do parise-core mora no projeto dele (pedido do Rafael, 05/11): blueprint e plano
+            poe("pc-parise-core-" + re.sub(r"[^a-z0-9]+", "-", Path(rel).stem.lower()).strip("-") + ".md", self.pasta_projetos / "parise-core-android" / rel)
         repos = [("Android Embeeded", self.projeto)]
         if self.pasta_projetos.is_dir():  # os outros projetos com git (ARENA, aulas, kit de IA...): so o titulo dos commits
             for g in sorted(list(self.pasta_projetos.glob("*/.git")) + list(self.pasta_projetos.glob("*/*/.git")) + list(self.pasta_projetos.glob("*/*/*/.git")))[:15]:
@@ -561,7 +561,7 @@ class Ponte:
                 if not any(p.casefold() in PASTAS_FORA_MEMORIA or _RE_ALUNO.search(p) for p in rel):
                     repos.append(("/".join(rel), g.parent))
         blocos = []
-        for nome, pasta in repos:  # o que o Claude Code fez nos ultimos dias: o Matrix aprende com isso
+        for nome, pasta in repos:  # o que o Claude Code fez nos ultimos dias: o parise-core aprende com isso
             try:
                 # stdin=DEVNULL (07/11/2026): no servico (pythonw, sem console) o git herdava uma entrada invalida e cada
                 # repositorio so terminava no limite de 20 s; com 10 repositorios, o pacote levava 3 minutos.
@@ -576,7 +576,7 @@ class Ponte:
         if blocos:
             arquivos["pc-claude-recente.md"] = ("# O que o Claude Code fez nos projetos (ultimos 3 dias; detalhe do celular em pc-estado e pc-decisoes)\n\n"
                                                + "\n\n".join(blocos)[:60_000] + "\n")
-        try:  # o mapa de cada projeto (o que e, limites, regras e cada arquivo): o Matrix Celular sabe o que existe e onde
+        try:  # o mapa de cada projeto (o que e, limites, regras e cada arquivo): o parise-core-android sabe o que existe e onde
             mapas = self._modulo_projetos().MAPAS
             for mapa in sorted(mapas.glob("*.md")) if mapas.is_dir() else []:
                 poe("pc-projeto-" + re.sub(r"[^a-z0-9]+", "-", mapa.stem.lower()).strip("-") + ".md", mapa, 130_000)
@@ -728,7 +728,7 @@ class Ponte:
 
     def projetos_lista(self):
         return {"projetos": self._consulta_projetos("lista_dados"),
-                "aviso": "Leitura e busca sao livres; escrever ou rodar comando no projeto e com o Claude Code ou o Matrix Windows (peca pela caixa)."}
+                "aviso": "Leitura e busca sao livres; escrever ou rodar comando no projeto e com o Claude Code ou o parise-core-windows (peca pela caixa)."}
 
     def projetos_buscar(self, texto, projeto=None, n=10):
         return {"busca": texto, "achados": self._consulta_projetos("buscar_dados", texto, projeto or None, n or 10)}
@@ -982,9 +982,9 @@ class Ponte:
          "inputSchema": {"type": "object", "properties": {"caminho": {"type": "string", "description": "ex.: memoria/ESTADO.md"}, "inicio": {"type": "integer"}, "fim": {"type": "integer"}}, "required": ["caminho"]}},
         {"name": "projeto_buscar", "description": "Procura um texto (sem distinguir maiusculas) em CLAUDE.md, memoria/ e scripts/ do projeto no PC; devolve caminho, linha e trecho.",
          "inputSchema": {"type": "object", "properties": {"texto": {"type": "string"}, "pasta": {"type": "string", "description": "opcional: memoria ou scripts"}}, "required": ["texto"]}},
-        {"name": "projetos_lista", "description": "Lista TODOS os projetos do Rafael que o Matrix conhece (ARENA, casa-mae do celular, Windows, os dois Matrix, kit de IA): o que e cada um, se e publico e quando foi indexado.",
+        {"name": "projetos_lista", "description": "Lista TODOS os projetos do Rafael que o parise-core conhece (ARENA, casa-mae do celular, Windows, os dois parise-core, kit de IA): o que e cada um, se e publico e quando foi indexado.",
          "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "projetos_mapa", "description": "O mapa de um projeto: o que e, os LIMITES do Matrix nele (definidos pelo Claude Code), as regras e cada arquivo com a primeira linha. Leia antes de responder sobre o projeto. Em fatias de linhas.",
+        {"name": "projetos_mapa", "description": "O mapa de um projeto: o que e, os LIMITES do parise-core nele (definidos pelo Claude Code), as regras e cada arquivo com a primeira linha. Leia antes de responder sobre o projeto. Em fatias de linhas.",
          "inputSchema": {"type": "object", "properties": {"projeto": {"type": "string", "description": "id da lista, ex.: arena"}, "inicio": {"type": "integer"}, "fim": {"type": "integer"}}, "required": ["projeto"]}},
         {"name": "projetos_buscar", "description": "Procura em TODAS as linhas de todos os projetos (codigo, guias, testes) e devolve projeto, arquivo, linha e trecho. Sem projeto, procura em todos.",
          "inputSchema": {"type": "object", "properties": {"texto": {"type": "string"}, "projeto": {"type": "string"}, "n": {"type": "integer", "description": "ate 40"}}, "required": ["texto"]}},

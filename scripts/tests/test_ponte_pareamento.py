@@ -407,9 +407,9 @@ def test_nao_sobrescreve_sem_guardar_copia_e_mantem_o_resto_do_settings(mundo, c
     assert "Bash(pkg *)" not in regras["deny"] and "Bash(memoria *)" in regras["allow"], "pkg install fica livre; so upgrade e remover travam"
     assert all(len(v) == len(set(v)) for v in regras.values()), "sem regra repetida"
     assert cfg["tools"]["approvalMode"] == "yolo", "pedido do Rafael: sem interromper"
-    assert cfg["ui"]["theme"] == "Matrix" and cfg["ui"]["customThemes"]["Matrix"]["Background"] == "#000000"
-    assert cfg["ui"]["customBannerTitle"] == "MATRIX" and "large" in cfg["ui"]["customAsciiArt"]
-    assert (cel.home / "bin" / "matrix").exists() and "MATRIX=1 exec bash" in ler(cel.home / "bin" / "matrix")
+    assert cfg["ui"]["theme"] == "parise-core" and cfg["ui"]["customThemes"]["parise-core"]["Background"] == "#000000"
+    assert cfg["ui"]["customBannerTitle"] == "PARISE-CORE" and "large" in cfg["ui"]["customAsciiArt"]
+    assert (cel.home / "bin" / "parise-core").exists() and "PARISE-CORE=1 exec bash" in ler(cel.home / "bin" / "parise-core")
     assert cfg["mcpServers"]["meu-servidor"] == {"command": "x"}, "servidor MCP dele fica"
     assert cfg["mcpServers"]["exa"]["httpUrl"] == "https://mcp.exa.ai/mcp" and cfg["mcpServers"]["exa"]["trust"] is False
     env = ler(cel.home / ".qwen" / ".env")
@@ -432,9 +432,9 @@ def test_rodar_de_novo_e_seguro_e_a_copia_original_nao_e_trocada(mundo, cel):
     assert list(cfg["mcpServers"]) == ["ponte-pc", "exa"]
     assert all(len(v) == len(set(v)) for v in cfg["permissions"].values()), "rodar de novo nao repete regra"
     assert ler(cel.home / ".bashrc").count("alias qwen=") == 1, "o atalho qwen entra uma vez so"
-    assert "alias qwen='matrix'" in ler(cel.home / ".bashrc")
+    assert "alias qwen='parise-core'" in ler(cel.home / ".bashrc")
     cores = ler(cel.home / ".termux" / "colors.properties")
-    assert cores.startswith("# matrix-kit v2") and "background=#000000" in cores and cores.count("# matrix-kit") == 1 and "#0F4D1F" not in cores
+    assert cores.startswith("# parise-core-kit v2") and "background=#000000" in cores and cores.count("# parise-core-kit") == 1 and "#0F4D1F" not in cores
     assert (cel.home / "kit" / "scripts-qwen").is_dir()
 
 
@@ -546,36 +546,36 @@ def test_a_instalacao_real_do_repositorio_funciona_de_ponta_a_ponta(tmp_path, im
         srv.server_close()
 
 
-def test_atalho_antigo_qwen_ia_vira_matrix_sem_perder_o_resto_do_bashrc(mundo, cel):
+def test_atalho_antigo_qwen_ia_vira_parise_core_sem_perder_o_resto_do_bashrc(mundo, cel):
     (cel.home / ".bashrc").write_text("export EDITOR=nano\nalias qwen='ia'  # antigo\nalias ll='ls -l'\n", encoding="utf-8")
     rc, saida = cel.roda(mundo.ponte.instalador(TOKEN, URL))
     assert rc == 0, saida
     b = ler(cel.home / ".bashrc")
     assert "export EDITOR=nano" in b and "alias ll='ls -l'" in b
-    assert b.count("alias qwen=") == 1 and "alias qwen='matrix'" in b and "alias qwen='ia'" not in b
+    assert b.count("alias qwen=") == 1 and "alias qwen='parise-core'" in b and "alias qwen='ia'" not in b
 
 
-def test_cores_antigas_do_termux_ganham_copia_antes_do_matrix(mundo, cel):
+def test_cores_antigas_do_termux_ganham_copia_antes_do_parise_core(mundo, cel):
     (cel.home / ".termux").mkdir()
     (cel.home / ".termux" / "colors.properties").write_text("background=#101010\n", encoding="utf-8")
     assert cel.roda(mundo.ponte.instalador(TOKEN, URL))[0] == 0
     assert ler(cel.home / ".qwen" / "antes-da-ponte" / "colors.properties") == "background=#101010\n"
-    assert "matrix-kit" in ler(cel.home / ".termux" / "colors.properties")
+    assert "parise-core-kit" in ler(cel.home / ".termux" / "colors.properties")
 
 
-def test_cores_matrix_v1_viram_v2_sem_virar_copia_das_antigas(mundo, cel):
+def test_cores_parise_core_v1_viram_v2_sem_virar_copia_das_antigas(mundo, cel):
     (cel.home / ".termux").mkdir()
-    (cel.home / ".termux" / "colors.properties").write_text("# matrix-kit: antigo\ncolor8=#0F4D1F\n", encoding="utf-8")
+    (cel.home / ".termux" / "colors.properties").write_text("# parise-core-kit: antigo\ncolor8=#0F4D1F\n", encoding="utf-8")
     assert cel.roda(mundo.ponte.instalador(TOKEN, URL))[0] == 0
     cores = ler(cel.home / ".termux" / "colors.properties")
-    assert cores.startswith("# matrix-kit v2") and "#0F4D1F" not in cores
+    assert cores.startswith("# parise-core-kit v2") and "#0F4D1F" not in cores
     assert not (cel.home / ".qwen" / "antes-da-ponte" / "colors.properties").exists(), "a v1 era do kit: nao vira 'cores antigas dele'"
 
 
-def test_tema_matrix_so_verde_cinza_e_branco_e_frases_da_personalidade(mundo, cel):
+def test_tema_parise_core_so_verde_cinza_e_branco_e_frases_da_personalidade(mundo, cel):
     assert cel.roda(mundo.ponte.instalador(TOKEN, URL))[0] == 0
     ui = json.loads(ler(cel.home / ".qwen" / "settings.json"))["ui"]
-    cores = {v.upper() for k, v in ui["customThemes"]["Matrix"].items() if isinstance(v, str) and v.startswith("#")}
+    cores = {v.upper() for k, v in ui["customThemes"]["parise-core"].items() if isinstance(v, str) and v.startswith("#")}
     assert cores <= {"#000000", "#00FF41", "#FFFFFF", "#B0B0B0", "#909090", "#3A3A3A"}, cores
     frases = " ".join(ui["customWittyPhrases"])
     assert "Compilando a realidade" not in frases and len(ui["customWittyPhrases"]) >= 15 and "Qwen" not in frases

@@ -35,7 +35,7 @@ def estado():
 
 
 def porta5555():
-    """Liga o adb pela porta 5555 (adb tcpip): o Matrix e o PC comandam o celular em QUALQUER rede (dados moveis tambem).
+    """Liga o adb pela porta 5555 (adb tcpip): o parise-core e o PC comandam o celular em QUALQUER rede (dados moveis tambem).
     Autorizado pelo Rafael em 05/11, com o risco explicado (a porta fica visivel na rede; so entra chave autorizada ou
     quem ele aceitar no aviso da tela). Cai ao reiniciar o celular."""
     _, porta = adb("shell", "getprop", "service.adb.tcp.port")
@@ -48,7 +48,7 @@ def porta5555():
             if porta.strip() == "5555":
                 break
     ok = porta.strip() == "5555"
-    print("Porta 5555 do adb: " + ("LIGADA (Matrix e PC alcancam o celular em qualquer rede, pela Tailscale)" if ok else "nao ligou"))
+    print("Porta 5555 do adb: " + ("LIGADA (parise-core e PC alcancam o celular em qualquer rede, pela Tailscale)" if ok else "nao ligou"))
     return 0 if ok else 1
 
 

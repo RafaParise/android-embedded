@@ -1,4 +1,4 @@
-"""Testes do chaveador do Matrix (o programa Python que mora dentro de scripts/celular-kit/bin/ia, entre CHAVEADOR_FIM).
+"""Testes do chaveador do parise-core (o programa Python que mora dentro de scripts/celular-kit/bin/ia, entre CHAVEADOR_FIM).
 
 Ele escuta em 127.0.0.1 e manda cada pedido do Qwen ao OmniRoute do PC ou, se o PC cair, ao do celular (com a chave local).
 Aqui o "PC" e a "reserva" sao servidores HTTP de teste em portas livres do proprio computador; nada toca rede nem celular.
@@ -273,8 +273,8 @@ def test_o_ia_so_usa_o_chaveador_com_a_reserva_pronta_e_permite_desligar():
 
 
 @pytest.mark.parametrize("chave", ["", "chave-errada", "chave-do-pc-e-mais", "chave-local"])
-def test_sem_a_chave_do_matrix_recusa_401_sem_repassar_nem_ligar_a_reserva(mundo, chave):
-    # outro app do celular abre a 20128: nao pode usar a reserva (nem a chave local injetada) sem saber a chave do Matrix
+def test_sem_a_chave_do_parise_core_recusa_401_sem_repassar_nem_ligar_a_reserva(mundo, chave):
+    # outro app do celular abre a 20128: nao pode usar a reserva (nem a chave local injetada) sem saber a chave do parise-core
     mundo.liga_pc()
     mundo.chaveador(inicio="local")
     cab, corpo = pede(mundo.porta, chave=chave)

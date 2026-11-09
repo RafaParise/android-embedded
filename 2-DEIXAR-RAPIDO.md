@@ -58,4 +58,4 @@ baixa do F-Droid oficial e confere o hash (`--instalar` instala pelo cabo); `mem
 
 O que já foi investigado a fundo, com prova (o "teto" sem root): [`memoria/RADAR-DESEMPENHO.md`](memoria/RADAR-DESEMPENHO.md).
 
-Próximo: [3-MATRIX-IA-NO-CELULAR.md](3-MATRIX-IA-NO-CELULAR.md).
+Próximo: [3-PARISE-CORE-IA-NO-CELULAR.md](3-PARISE-CORE-IA-NO-CELULAR.md).

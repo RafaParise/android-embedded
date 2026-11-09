@@ -835,7 +835,7 @@ def test_parar_recusa_enquanto_ha_um_qwen_aberto_e_so_desliga_com_forca(amb):
     try:
         rc, saida = amb.roda("parar")
         assert rc == 1, saida
-        assert "Matrix aberto" in saida and str(qwen.pid) in saida and "ia parar --forca" in saida, saida
+        assert "parise-core aberto" in saida and str(qwen.pid) in saida and "ia parar --forca" in saida, saida
         assert vivo(ponte), "ia parar derrubou a ponte de uma conversa que estava aberta"
         assert not amb.chamadas("pkill"), "recusou, entao nao pode ter mandado parar o llama-server"
         rc, saida = amb.roda("parar", "--forca")
@@ -1390,17 +1390,17 @@ def test_reserva_com_o_servidor_ja_no_ar_nao_liga_outro_e_so_poe_a_ponte(amb):
     assert "inicio=chave-local-" in linha
 
 
-def test_matrix_offline_percebe_a_volta_da_internet_e_reabre_completo_uma_vez(amb):
+def test_parise_core_offline_percebe_a_volta_da_internet_e_reabre_completo_uma_vez(amb):
     # a conversa offline dura ~2 s; nesse meio tempo o Ollama do PC "volta" (entra no mundo falso)
     amb.poe_falso("llama-cli", '#!/bin/bash\necho "llama-cli $*" >> "$FAKE_LOG"\n'
                   f'echo "{PC_IP}:11434" >> "$FAKE_MUNDO"\nsleep 2\nexit 0\n')
-    rc, saida = amb.roda(env_extra={"MATRIX": "1", "IA_VIGIA_REDE": "0.3"}, timeout=40)
+    rc, saida = amb.roda(env_extra={"PARISE-CORE": "1", "IA_VIGIA_REDE": "0.3"}, timeout=40)
     assert rc == 0, saida
-    assert "A internet voltou" in saida and "Reabrindo o Matrix completo" in saida
+    assert "A internet voltou" in saida and "Reabrindo o parise-core completo" in saida
     assert len(amb.chamadas("llama-cli")) == 1, "reabre uma vez so"
     assert "--model llama3.2-32k" in amb.chamadas("qwen")[0]
 
 
-def test_sem_matrix_a_conversa_nao_vigia_a_rede(amb):
+def test_sem_parise_core_a_conversa_nao_vigia_a_rede(amb):
     rc, saida = amb.roda("chat", env_extra={"IA_VIGIA_REDE": "0.1"})
     assert rc == 0 and "A internet voltou" not in saida and "Reabrindo" not in saida

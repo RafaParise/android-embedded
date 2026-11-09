@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Icones estilo Matrix (pedido do Rafael, 05/11/2026): todos os apps do A12 em pixel, verde puro sobre preto.
+"""Icones estilo parise-core (pedido do Rafael, 05/11/2026): todos os apps do A12 em pixel, verde puro sobre preto.
 
-  python scripts/icones-matrix.py exportar   o celular desenha o icone de cada app (app do papel rolante) e o PC copia
-  python scripts/icones-matrix.py gerar      faz a versao Matrix de cada um + uma folha de amostra (amostra.png)
-  python scripts/icones-matrix.py celular    manda os icones Matrix para Pictures/Icones-Matrix no celular
-  python scripts/icones-matrix.py tudo       os tres
+  python scripts/icones-parise-core.py exportar   o celular desenha o icone de cada app (app do papel rolante) e o PC copia
+  python scripts/icones-parise-core.py gerar      faz a versao parise-core de cada um + uma folha de amostra (amostra.png)
+  python scripts/icones-parise-core.py celular    manda os icones parise-core para Pictures/Icones-parise-core no celular
+  python scripts/icones-parise-core.py tudo       os tres
 
-Pasta: diagnostico/icones-matrix/ (fora do git: os originais sao arte de terceiros).
+Pasta: diagnostico/icones-parise-core/ (fora do git: os originais sao arte de terceiros).
 Cores: so preto #000000, verde puro #00FF41, cinza #909090 e branco #FFFFFF (sem verde escuro: pedido do Rafael).
 Como aplicar: a tela inicial da Samsung NAO aceita pacote de icones de terceiros [Provavel]; caminhos possiveis em
-memoria/PLANO-MATRIX.md (Theme Park do Good Lock, que pede conta Samsung, ou um launcher com pacote de icones).
+memoria/PLANO-PARISE-CORE.md (Theme Park do Good Lock, que pede conta Samsung, ou um launcher com pacote de icones).
 """
 import pathlib
 import subprocess
@@ -17,10 +17,10 @@ import sys
 import time
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
-PASTA = RAIZ / "diagnostico" / "icones-matrix"
-ORIG, MATRIX = PASTA / "originais", PASTA / "matrix"
+PASTA = RAIZ / "diagnostico" / "icones-parise-core"
+ORIG, PARISE_CORE = PASTA / "originais", PASTA / "parise-core"
 NO_CELULAR = "/sdcard/Android/data/br.embeeded.papel/files/icones"
-DESTINO_CELULAR = "/sdcard/Pictures/Icones-Matrix"
+DESTINO_CELULAR = "/sdcard/Pictures/Icones-parise-core"
 PRETO, VERDE, CINZA, BRANCO = (0, 0, 0, 255), (0, 255, 65, 255), (144, 144, 144, 255), (255, 255, 255, 255)
 GRADE, MIOLO, ESCALA = 32, 22, 6  # 32x32 pixels "grandes"; o desenho ocupa 22x22 no meio; 32*6 = 192 px
 _executa = subprocess.run
@@ -70,8 +70,8 @@ def fundo_da_borda(im):
     return tuple(min(255, v * 24 + 12) for v in k)
 
 
-def matrix(origem):
-    """Um icone -> versao Matrix: o que difere do fundo vira verde; fino demais vira cinza; o resto, preto."""
+def parise_core(origem):
+    """Um icone -> versao parise-core: o que difere do fundo vira verde; fino demais vira cinza; o resto, preto."""
     from PIL import Image
 
     im = Image.open(origem).convert("RGBA")
@@ -113,13 +113,13 @@ def gerar():
 
     arquivos = sorted(ORIG.glob("*.png"))
     if not arquivos:
-        print("Sem originais: rode antes  python scripts\\icones-matrix.py exportar")
+        print("Sem originais: rode antes  python scripts\\icones-parise-core.py exportar")
         return 1
-    MATRIX.mkdir(parents=True, exist_ok=True)
+    PARISE_CORE.mkdir(parents=True, exist_ok=True)
     feitos = []
     for a in arquivos:
-        m = matrix(a)
-        m.save(MATRIX / a.name)
+        m = parise_core(a)
+        m.save(PARISE_CORE / a.name)
         feitos.append(m)
     col = 10
     lin = (len(feitos) + col - 1) // col
@@ -127,17 +127,17 @@ def gerar():
     for i, m in enumerate(feitos):
         folha.paste(m.resize((96, 96), Image.NEAREST), ((i % col) * 100 + 2, (i // col) * 100 + 2))
     folha.save(PASTA / "amostra.png")
-    print(f"{len(feitos)} icones Matrix em {MATRIX}; amostra: {PASTA / 'amostra.png'}")
+    print(f"{len(feitos)} icones parise-core em {PARISE_CORE}; amostra: {PASTA / 'amostra.png'}")
     return 0
 
 
 def celular():
-    arquivos = sorted(MATRIX.glob("*.png"))
+    arquivos = sorted(PARISE_CORE.glob("*.png"))
     if not arquivos:
-        print("Sem icones Matrix: rode antes  gerar")
+        print("Sem icones parise-core: rode antes  gerar")
         return 1
     adb("shell", "mkdir -p " + DESTINO_CELULAR)
-    rc, s = adb("push", str(MATRIX) + "/.", DESTINO_CELULAR, limite=300)
+    rc, s = adb("push", str(PARISE_CORE) + "/.", DESTINO_CELULAR, limite=300)
     print(f"{len(arquivos)} icones em {DESTINO_CELULAR} no celular" if rc == 0 else "falhou: " + s[-200:])
     return rc
 
@@ -158,7 +158,7 @@ def pacote():
             print("Falta " + str(f) + " (rode antes scripts\\celular-kit\\papel\\compilar.ps1)")
             return 2
     indice = ORIG / "indice.tsv"
-    if not indice.exists() or not list(MATRIX.glob("*.png")):
+    if not indice.exists() or not list(PARISE_CORE.glob("*.png")):
         print("Rode antes: exportar e gerar")
         return 1
     obra = PASTA / "pacote"
@@ -169,11 +169,11 @@ def pacote():
     itens = []
     for linha in indice.read_text(encoding="utf-8").splitlines():
         partes = linha.split("\t")
-        if len(partes) < 2 or not (MATRIX / partes[1]).exists():
+        if len(partes) < 2 or not (PARISE_CORE / partes[1]).exists():
             continue
         comp, arq = partes[0], partes[1]
         nome = "m_" + re.sub(r"[^a-z0-9_]", "_", comp.lower())[:90]
-        shutil.copyfile(MATRIX / arq, obra / "res" / "drawable-nodpi" / (nome + ".png"))
+        shutil.copyfile(PARISE_CORE / arq, obra / "res" / "drawable-nodpi" / (nome + ".png"))
         pacote_, atividade = comp.split("/", 1)
         itens.append((f"ComponentInfo{{{pacote_}/{atividade}}}", nome))
     filtro = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n" + "".join(
@@ -186,7 +186,7 @@ def pacote():
     filtros = "".join(f"            <intent-filter><action android:name=\"{a}\" /><category android:name=\"android.intent.category.DEFAULT\" /></intent-filter>\n" for a in acoes)
     (obra / "AndroidManifest.xml").write_text(f"""<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="br.embeeded.icones">
-    <application android:label="Icones Matrix" android:icon="@drawable/{itens[0][1]}" android:hasCode="false" android:allowBackup="false">
+    <application android:label="Icones parise-core" android:icon="@drawable/{itens[0][1]}" android:hasCode="false" android:allowBackup="false">
         <activity android:name="android.app.Activity" android:exported="true">
 {filtros}        </activity>
     </application>
@@ -200,7 +200,7 @@ def pacote():
     roda([aapt2, "link", "-o", obra / "cru.apk", "-I", android_jar, "--manifest", obra / "AndroidManifest.xml", "-A", obra / "assets",
           "--min-sdk-version", "26", "--target-sdk-version", "31", "--version-code", "1", "--version-name", "1.0", obra / "res.zip"])
     roda([zipalign, "-f", "4", obra / "cru.apk", obra / "alinhado.apk"])
-    saida = PASTA / "icones-matrix.apk"
+    saida = PASTA / "icones-parise-core.apk"
     roda([java, "-jar", apksigner, "sign", "--ks", chave, "--ks-key-alias", "papel", "--ks-pass", "file:" + str(senha), "--out", saida, obra / "alinhado.apk"])
     print(f"Pacote de icones: {saida} ({saida.stat().st_size // 1024} KB, {len(itens)} apps). Instalar: adb install -r \"{saida}\"")
     (PASTA / "pacote.json").write_text(json.dumps({"apps": len(itens)}), encoding="utf-8")

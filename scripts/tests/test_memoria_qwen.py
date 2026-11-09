@@ -261,14 +261,14 @@ def test_resumo_cabe_no_modelo_do_celular(cel):
 
 def test_pacote_traz_o_que_o_claude_fez(ponte):
     class R:
-        stdout = "- 04/11 20:00 Matrix: memoria local\n- 04/11 19:00 chave sk-" + "a" * 40
+        stdout = "- 04/11 20:00 parise-core: memoria local\n- 04/11 19:00 chave sk-" + "a" * 40
     chamadas = []
     ponte._executa = lambda cmd, **kw: (chamadas.append(cmd), R())[1]
     arq = ponte.memoria_pacote()["arquivos"]
     assert "pc-claude-recente.md" not in arq, "log com segredo nao vai"
-    R.stdout = "- 04/11 20:00 Matrix: memoria local"
+    R.stdout = "- 04/11 20:00 parise-core: memoria local"
     arq = ponte.memoria_pacote()["arquivos"]
-    assert "Matrix: memoria local" in arq["pc-claude-recente.md"] and chamadas[0][:2] == ["git", "-C"]
+    assert "parise-core: memoria local" in arq["pc-claude-recente.md"] and chamadas[0][:2] == ["git", "-C"]
 
 
 def test_topico_nao_cresce_sem_fim_e_o_antigo_vai_para_a_lixeira(cel):
@@ -337,7 +337,7 @@ def test_arquivos_incremental_e_some_quando_apagado(cel, tmp_path):
 
 def test_memoria_no_cartao_com_reserva_interna(cel, tmp_path):
     cel.roda("lembrar", "wifi", "fato antigo de wi-fi")
-    sd = tmp_path / "sd" / "matrix-memoria"
+    sd = tmp_path / "sd" / "parise-core-memoria"
     rc, s = cel.roda("cartao", "ligar", str(sd))
     assert rc == 0 and "conferidos" in s
     assert (sd / "topicos" / "wifi.md").exists()
@@ -375,12 +375,12 @@ def test_arquivos_pula_bibliotecas_de_terceiros(cel, tmp_path):
     assert "timeit.html" not in s and "util.py" in s
 
 
-def test_pacote_traz_o_blueprint_e_o_plano_do_projeto_matrix_celular(ponte):
-    mc = ponte.pasta_projetos / "matrix-celular" / "memoria"
+def test_pacote_traz_o_blueprint_e_o_plano_do_projeto_parise_core_android(ponte):
+    mc = ponte.pasta_projetos / "parise-core-android" / "memoria"
     mc.mkdir(parents=True)
     (mc / "BLUEPRINT-A12.md").write_text("# BLUEPRINT\nsem infravermelho\nconta: alguem@exemplo.com\n", encoding="utf-8")
-    (mc / "PLANO.md").write_text("# plano do Matrix\n", encoding="utf-8")
+    (mc / "PLANO.md").write_text("# plano do parise-core\n", encoding="utf-8")
     (mc / "OUTRO.md").write_text("# nao vai\n", encoding="utf-8")
     arq = ponte.memoria_pacote()["arquivos"]
-    assert "sem infravermelho" in arq["pc-matrix-blueprint-a12.md"] and "alguem@" not in arq["pc-matrix-blueprint-a12.md"]
-    assert "pc-matrix-plano.md" in arq and not [k for k in arq if "outro" in k]
+    assert "sem infravermelho" in arq["pc-parise-core-blueprint-a12.md"] and "alguem@" not in arq["pc-parise-core-blueprint-a12.md"]
+    assert "pc-parise-core-plano.md" in arq and not [k for k in arq if "outro" in k]

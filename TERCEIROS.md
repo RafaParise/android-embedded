@@ -9,7 +9,7 @@ oficiais, os programas abaixo; cada um tem a sua licença.
 | scrcpy | espelhar e comandar o celular, tela extra, webcam | Apache-2.0 | github.com/Genymobile/scrcpy |
 | Tailscale | rede particular entre PC e celular | BSD-3-Clause (cliente) | tailscale.com |
 | Termux, Termux:API, Termux:Boot | o Linux do celular | GPL-3.0 | F-Droid |
-| Qwen Code | o agente do Matrix | Apache-2.0 | github.com/QwenLM/qwen-code |
+| Qwen Code | o agente do parise-core | Apache-2.0 | github.com/QwenLM/qwen-code |
 | OmniRoute | roteador das IAs grátis | ver o projeto | npm / GitHub do autor |
 | Ollama | modelos locais no PC | MIT | ollama.com |
 | ClamAV | motor do antivírus `guarda` | GPL-2.0 | clamav.net |
@@ -27,7 +27,7 @@ oficiais, os programas abaixo; cada um tem a sua licença.
 
 - **Listas de lugares dos mapas**: geradas no seu PC a partir do Censo Escolar do INEP e do Overture
   Maps (licenças por registro). `scripts/mapas-lugares.py` e `scripts/mapas-overture/` baixam e montam.
-- **Ícones dos apps**: `scripts/icones-matrix.py` redesenha no seu PC os ícones instalados no seu
+- **Ícones dos apps**: `scripts/icones-parise-core.py` redesenha no seu PC os ícones instalados no seu
   celular; o resultado tem marcas de terceiros e não é distribuído.
 - **Lista de apps perigosos de desativar**: baseada nas listas comunitárias do UAD-ng, que o script
   `cruzar-uad.py` baixa do projeto original.

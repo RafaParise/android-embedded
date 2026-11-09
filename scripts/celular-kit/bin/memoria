@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/python3
-"""memoria - a memoria local do Matrix no celular: le, busca e guarda o que ele aprende (so texto, so no celular).
+"""memoria - a memoria local do parise-core no celular: le, busca e guarda o que ele aprende (so texto, so no celular).
 
   memoria buscar TEXTO [-n 8]       procura em tudo (aparelho, apps, projetos, o que foi aprendido); comece TODA tarefa por aqui
   memoria ler TOPICO                mostra um topico inteiro (memoria topicos lista os nomes)
@@ -361,7 +361,7 @@ def pedacos_arquivo(texto, sufixo):
 
 
 def atualiza_arquivos():
-    """Indexa (so o texto) os arquivos dos projetos do cartao: o Matrix acha qualquer trecho deles sem internet.
+    """Indexa (so o texto) os arquivos dos projetos do cartao: o parise-core acha qualquer trecho deles sem internet.
     Incremental pela data do arquivo; pula pasta de aluno, MAPAO, notas e backup; tira linha com e-mail, CPF ou dado de
     aluno; arquivo com chave de verdade fica de fora. Devolve (indexados agora, total)."""
     con, fts = abre_indice()
@@ -435,7 +435,7 @@ def pasta_cartao():
     for v in volumes():
         d = v / "Android" / "data" / "com.termux" / "files"
         if d.is_dir() and os.access(d, os.W_OK):
-            return d / "matrix-memoria"
+            return d / "parise-core-memoria"
     return None
 
 
@@ -598,7 +598,7 @@ def status():
     n = con.execute("SELECT count(*) FROM t").fetchone()[0]
     con.close()
     pc = [p for p in tops if p.stem.startswith("pc-")]
-    print(f"Memoria do Matrix: {len(tops)} topicos ({len(pc)} do PC), {n} trechos no indice ({'busca completa' if fts else 'busca simples'}).")
+    print(f"Memoria do parise-core: {len(tops)} topicos ({len(pc)} do PC), {n} trechos no indice ({'busca completa' if fts else 'busca simples'}).")
     try:
         con, _ = abre_indice()
         na = con.execute("SELECT count(*) FROM arq_meta").fetchone()[0]

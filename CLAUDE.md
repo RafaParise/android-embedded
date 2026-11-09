@@ -36,7 +36,7 @@ mais rápido e automatizado **pelo ADB, sem root**, com cada mudança reversíve
 ## Onde está cada coisa
 - `scripts/`: um script por tarefa, cada um com o uso e o desfazer no comentário do topo.
 - `scripts/celular-kit/`: o que vai para o Termux (`bin/`: `ia`, `cel`, `memoria`, `caixa`, `saida`,
-  `guarda`, `linux`; `QWEN.md`: a personalidade e as regras do Matrix; `settings.json`: as travas).
+  `guarda`, `linux`; `QWEN.md`: a personalidade e as regras do parise-core; `settings.json`: as travas).
 - `scripts/celular-kit/papel/` e `tela/`: código Java dos ajudantes (compilam sem Gradle).
 - `scripts/tests/`: a bateria de testes.
 - `memoria/`: documentos técnicos, com o que foi medido e o que falhou. Leia o do assunto antes de

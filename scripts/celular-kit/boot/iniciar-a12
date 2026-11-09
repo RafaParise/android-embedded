@@ -13,7 +13,7 @@ mkdir -p "$HOME/.cache/saida"
   echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $s; guarda: rc=$rc $(printf '%s' "$g" | tr '\n' ' ')"
   command -v guarda >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: vigia de arquivos: $(guarda ligar 2>&1 | tr '\n' ' ')"
 } >> "$LOG" 2>&1
-# memoria do Matrix: se alimenta sozinha (aparelho, apps, rotina, projetos do cartao e, com o PC no ar, o que o Claude fez)
+# memoria do parise-core: se alimenta sozinha (aparelho, apps, rotina, projetos do cartao e, com o PC no ar, o que o Claude fez)
 alimenta() { command -v memoria >/dev/null 2>&1 && nice -n 15 timeout 600 memoria atualizar --auto >/dev/null 2>&1; }
 ( sleep 300; alimenta ) &
 hora=0

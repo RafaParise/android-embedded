@@ -42,7 +42,7 @@ confiável. Tem dois papéis:
 |---|---|
 | 🧹 **Faxina segura** | Desativa os apps de fábrica em lotes, com um substituto livre declarado para cada função e uma lista do que **nunca** se toca (telefone, Play Store, câmera...). Simula antes, aplica só quando você manda, desfaz com um comando |
 | 🩺 **Painel de saúde** | `saude.py` mostra bateria, temperatura, memória, quem está pesando e o espaço livre, e guarda o histórico. `auditoria.py` confere mais de 150 itens do aparelho de uma vez |
-| 🤖 **Matrix, a IA do celular** | O Qwen Code no Termux, com personalidade própria, memória local no cartão SD e o comando `cel` para **ler a tela e tocar nos botões** de qualquer app (e recusar sozinho os botões sem volta, como "Desinstalar" ou "Pagar") |
+| 🤖 **parise-core, a IA do celular** | O Qwen Code no Termux, com personalidade própria, memória local no cartão SD e o comando `cel` para **ler a tela e tocar nos botões** de qualquer app (e recusar sozinho os botões sem volta, como "Desinstalar" ou "Pagar") |
 | 🌍 **Sem cabo, de qualquer lugar** | Pela Tailscale (VPN grátis), o celular alcança o PC e o PC alcança o celular, no Wi-Fi ou nos dados móveis: a IA do PC, a ponte do projeto e o ADB pela porta 5555 |
 | 🖥️ **Segunda tela** | O PC mostra e comanda o celular, abre uma tela **extra** do celular numa janela, ou usa o celular como monitor do PC |
 | 🎙️ **Ditado sem nuvem** | Voz para texto no próprio celular (WhisperIME, com a tecla de microfone do teclado) e no PC (Handy), sem mandar o áudio para ninguém |
@@ -98,7 +98,7 @@ confiável. Tem dois papéis:
 |---|---|
 | [1-COMECAR.md](1-COMECAR.md) | Instalar, ligar a depuração e fazer o primeiro diagnóstico |
 | [2-DEIXAR-RAPIDO.md](2-DEIXAR-RAPIDO.md) | Faxina dos apps, ajustes que valem e os que não valem, medir antes e depois |
-| [3-MATRIX-IA-NO-CELULAR.md](3-MATRIX-IA-NO-CELULAR.md) | A IA no Termux: instalar, conversar, operar apps, memória e limites |
+| [3-PARISE-CORE-IA-NO-CELULAR.md](3-PARISE-CORE-IA-NO-CELULAR.md) | A IA no Termux: instalar, conversar, operar apps, memória e limites |
 | [4-SEM-CABO.md](4-SEM-CABO.md) | Tailscale, ADB pela rede, segunda tela, webcam e saída de internet pelo PC |
 | [5-TELA-SOM-E-VOZ.md](5-TELA-SOM-E-VOZ.md) | Papel rolante, tela apagada, ditado sem nuvem, microfone e fone Bluetooth |
 | [6-SEGURANCA-E-REPARO.md](6-SEGURANCA-E-REPARO.md) | Antivírus, auditoria, cópia e restauração, o que nunca fazer e como desfazer |
@@ -133,7 +133,7 @@ parede) está marcado no próprio script. Rode a auditoria, que só lê, e veja 
 
 **Por que a IA às vezes erra?** Os modelos grátis são pequenos perto dos pagos. Por isso o projeto tem
 travas: a IA não desinstala, não apaga, não toca em botão sem volta e anota as próprias lições para não
-repetir o erro ([`memoria/LICOES-MATRIX.md`](memoria/LICOES-MATRIX.md)).
+repetir o erro ([`memoria/LICOES-PARISE-CORE.md`](memoria/LICOES-PARISE-CORE.md)).
 
 **Com dois controles Bluetooth ligados, a internet cai.** É limite do A12, que só tem Wi-Fi de 2,4 GHz,
 a mesma faixa do Bluetooth. Medido: o roteador passa a responder em 3 a 5 segundos. Use os dados móveis

@@ -44,7 +44,7 @@ O que volta e o que não volta: [`memoria/COPIA-E-RESTAURAR.md`](memoria/COPIA-E
 | Papel rolante | `python scripts\papel-rolante.py desfazer` |
 | Saída pelo PC | `saida desligar` (Termux) ou o app da Tailscale > Exit node > None |
 | Voz offline | `memoria/VOZ-OFFLINE.md`, seção "Desfazer" |
-| Kit do Matrix | `pwsh scripts\ponte-pc.ps1 -Desinstalar` e `-NovoToken` (revoga o acesso) |
+| Kit do parise-core | `pwsh scripts\ponte-pc.ps1 -Desinstalar` e `-NovoToken` (revoga o acesso) |
 
 ## Recuperar arquivos apagados
 
