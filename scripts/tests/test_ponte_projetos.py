@@ -1,4 +1,4 @@
-"""A ponte entrega ao parise-core-android o indice de TODOS os projetos (o projetos.py do parise-core-windows), 07/11/2026.
+"""A ponte entrega ao univo-android o indice de TODOS os projetos (o projetos.py do univo-windows), 07/11/2026.
 
 Projeto falso em pasta temporaria; o indice tambem (PROJETOS_DIR). Nada do PC de verdade e lido.
 """
@@ -9,9 +9,9 @@ import types
 
 import pytest
 
-PROJETOS_PY = next((p for p in (pathlib.Path("/mnt/c/Projetos/parise-core-windows/bin/projetos.py"),
-                                pathlib.Path(r"C:\Projetos\parise-core-windows\bin\projetos.py")) if p.is_file()), None)
-pytestmark = pytest.mark.skipif(PROJETOS_PY is None, reason="precisa do parise-core-windows\\bin\\projetos.py")
+PROJETOS_PY = next((p for p in (pathlib.Path("/mnt/c/Projetos/univo-windows/bin/projetos.py"),
+                                pathlib.Path(r"C:\Projetos\univo-windows\bin\projetos.py")) if p.is_file()), None)
+pytestmark = pytest.mark.skipif(PROJETOS_PY is None, reason="precisa do univo-windows\\bin\\projetos.py")
 SEGREDO_FALSO = "sk-or-v1-" + "a1" * 20
 
 

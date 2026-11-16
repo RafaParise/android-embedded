@@ -17,7 +17,7 @@ dados móveis, sem abrir porta no roteador.
 Com o cabo ligado uma vez: `python scripts\depuracao-sem-fio.py porta5555`. A partir daí:
 
 - o **PC** alcança o celular em `IP-do-celular:5555` pela Tailscale (`python scripts\adb-remoto.py garantir`);
-- o **Matrix** alcança o próprio celular em `127.0.0.1:5555`, em qualquer rede.
+- o **Univo** alcança o próprio celular em `127.0.0.1:5555`, em qualquer rede.
 
 **Risco, dito às claras:** a porta 5555 aceita comandos de quem estiver na mesma rede e tiver a chave do
 ADB autorizada. Ela cai quando o celular reinicia (o `cel` religa). Use só no seu aparelho.

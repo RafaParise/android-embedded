@@ -23,7 +23,7 @@ primeira resposta pode levar alguns dias.
 - **OmniRoute (20128) e Ollama (11434)**: abertos só para a tailnet, nunca para a internet.
 - **ADB pela porta 5555**: aceita só chaves já autorizadas no aparelho; cai ao reiniciar. Risco
   documentado no guia 4.
-- **Matrix** (Qwen Code no Termux): lista de negados no `settings.json` que bloqueia o irreversível
+- **Univo** (Qwen Code no Termux): lista de negados no `settings.json` que bloqueia o irreversível
   mesmo no modo sem confirmação; o `cel tocar` recusa botões sem volta.
 - **Navegador de teste** (`scripts/navegador.py`): recusa endereço interno, inclusive por redirecionamento.
 - **Publicação** (`scripts/publicar.py`): só uma lista permitida sai, com troca dos dados pessoais e

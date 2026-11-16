@@ -10,7 +10,7 @@ O trabalho de 27/10 a 05/11/2026 num Galaxy A12 de verdade, aberto para todo mun
 - **Faxina segura** em lotes, com substitutos livres (Fossify, HeliBoard, Fennec, Organic Maps...),
   lista de protegidos e desfazer (`lote-pacotes.py`).
 - **Painel de saúde** (`saude.py`) e **auditoria** de mais de 150 itens (`auditoria.py`).
-- **Matrix, a IA do celular**: Qwen Code no Termux com personalidade, memória local no cartão SD,
+- **Univo, a IA do celular**: Qwen Code no Termux com personalidade, memória local no cartão SD,
   receitas offline e o `cel` para ler a tela e tocar nos botões de qualquer app, com travas para o
   irreversível.
 - **Sem cabo, de qualquer lugar**: Tailscale, ADB pela porta 5555, ponte do PC com lista fechada de ações.

@@ -1,4 +1,4 @@
-"""Testes do `pedidos` (celular-kit/bin/pedidos): a fila dos pedidos do Rafael ao parise-core."""
+"""Testes do `pedidos` (celular-kit/bin/pedidos): a fila dos pedidos do Rafael ao Univo."""
 import importlib.machinery
 import importlib.util
 import json
