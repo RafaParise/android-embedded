@@ -225,3 +225,21 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
 - Precisa: Sala do Futuro logada dentro do Ordoc (a EP e o Tarefa SP entram por ela). Login e do professor.
 - Homonimos na turma: o Ordoc nao chuta, pede o nome completo. Fonte que falhou aparece como NAO LIDA, nunca como "nao fez".
 - Nome nao encontrado: escreva como esta na chamada (17/11: 'y' em vez de 'i' e sem o sobrenome do cadastro nao achou); o Ordoc mostra os nomes parecidos da turma para o professor tocar no certo. A 1a leitura da EP leva ~40 min; as proximas usam a leitura guardada.
+
+## Aula pratica a partir do pacote da semana (pedido do professor, 18/11) [repositorio aulas-praticas; feito com S24 e S25]
+- O que e: o Registro da Aula (atividade que vai para o AVA) com plano, roteiro do professor, guia e um script de demonstracao.
+- Fonte da verdade: o pacote da semana na plataforma EP = Material da Aula + Roteiro/Material de Apoio + enunciado do Registro + Pause e Responda (perguntas e respostas). Os tres falam a mesma lingua.
+- Quem coleta: o Ordoc (script de leitura `ep_pacote_semana`), no PC pelo `pacote_semana.ps1`; a EP e logada pelo professor. Uma pagina por vez, com pausa.
+- Quem escreve: o Claude no PC (modulo + script + `gerar_aulas.py`). O Univo explica o caminho, lembra a semana que falta (`memoria\ESTADO.md` do projeto) e nunca inventa objetivo ou habilidade: copia do slide.
+- Cuidado: material da CDN com o mesmo codigo pode ser de outro assunto; roteiro oficial pode ter comando errado; vale o Registro e o slide, e o professor e avisado.
+- Caso real variado: ARENA, Univo-Sync (bancada) ou Android Embedded; em Logica, o modelo usa outro tema para nao entregar a resposta.
+
+## Mensagens de status do Univo (spinner), 18/11 [celular e PC, catalogo unico]
+- O que e: enquanto o Univo pensa, a 1a frase reage ao assunto do pedido e as seguintes giram (troca a cada 8 s) ate a resposta.
+- Ele fala: "as frases de carregamento estao repetindo" / "troca aquela frase" -> Voce: nao edite nada; abra pedido na caixa
+  (`caixa pedido "frase de status: ..."`). O catalogo e do Claude: `scripts/celular-kit/status/frases-status.json` (casa-mae).
+- Ele fala: "a primeira frase sumiu" -> Voce roda: `python3 ~/.qwen/univo-status/status_univo.py qwen-patch conferir`
+  (desligada = o Qwen Code foi atualizado; peca ao Claude reinstalar o kit). Desligar de proposito: `... qwen-patch desfazer`.
+- `ia qwen "pergunta"`: o mesmo spinner no terminal (some antes da resposta; Ctrl+C tambem o encerra).
+- PC (Hermes): plugin `univo-status` + skin `univo`; desfazer pelo `instalar.ps1 -Desfazer` do univo-windows.
+

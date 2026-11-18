@@ -805,7 +805,16 @@ import json, os
 print(json.dumps({"model": os.environ["IA_QWEN"], "max_tokens": 1500, "temperature": 0.3, "messages": [
     {"role": "system", "content": os.environ["IA_SISTEMA"]},
     {"role": "user", "content": os.environ["IA_PERGUNTA"]}]}))' > "$req" )
+  # 18/11/2026: enquanto espera (ate 2 min), o spinner do Univo no stderr: a 1a frase reage ao assunto do pedido e as
+  # outras giram pelo catalogo unico (~/.qwen/univo-status, o mesmo do Hermes do PC). Ele some antes da resposta; no
+  # Ctrl+C ou se este script morrer, o trap e o proprio spinner (vigia o processo pai) o encerram.
+  local giro="" st_univo="$HOME/.qwen/univo-status/status_univo.py"
+  if [ -t 2 ] && [ -f "$st_univo" ]; then
+    python3 -I "$st_univo" girar -- "${pergunta:0:2000}" & giro=$!
+    trap '[ -n "$giro" ] && kill "$giro" 2>/dev/null' EXIT
+  fi
   resp=$(printf 'header = "Authorization: Bearer %s"\n' "$CHAVE" | curl -s -K - -m 120 -H 'Content-Type: application/json' --data-binary @"$req" -w '%{http_code}' "http://$base/v1/chat/completions")
+  if [ -n "$giro" ]; then kill "$giro" 2>/dev/null; wait "$giro" 2>/dev/null; giro=""; trap - EXIT; fi
   rm -f "$req"
   http=${resp: -3}
   printf '%s' "${resp%???}" | IA_COD="$http" python3 -I -c '

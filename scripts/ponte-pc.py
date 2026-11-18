@@ -60,7 +60,7 @@ MAX_PAREAMENTOS_PENDENTES = 5
 URL_PUBLICA_PADRAO = "http://100.64.0.1:20130"     # o PC na Tailscale (IP fixo do aparelho); --url-publica troca
 URL_PUBLICA_OK = re.compile(r"http://[A-Za-z0-9.\-]{1,100}:\d{2,5}")
 TOKEN_OK = re.compile(r"[A-Za-z0-9_\-]{32,128}")
-ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "pedidos": "bin/pedidos", "telemetria": "bin/telemetria", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
+ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "pedidos": "bin/pedidos", "telemetria": "bin/telemetria", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md", "status_py": "status/status_univo.py", "status_js": "status/status_univo.cjs", "status_json": "status/frases-status.json"}  # o que o instalador leva ao celular
 # Telemetria de aparelhos (17/11/2026): perfis de hardware/software/rede, SEM dado pessoal, que o celular manda pela Tailscale.
 # A base fica na univo-sync (memoria/telemetria/ esta fora do git); `telemetria resumo` no PC refaz o PERFIS.md.
 TELEMETRIA_DIR = os.environ.get("UNIVO_TELEMETRIA_DIR", r"C:\Projetos\univo-sync\memoria\telemetria\perfis")
@@ -375,18 +375,15 @@ ui["customAsciiArt"] = {
               "    ██       ██    ██  ██████   █████\n    ██       ██    ██  ██   ██  ██\n"
               "     ██████   ██████   ██   ██  ███████"),
 }
-ui["customWittyPhrases"] = [  # personalidade do Univo (robo de missao + mordomo + medico cetico); frases originais
-    "Humor em 80%. Paciência em análise...", "Lendo seus logs. Você não vai gostar...", "Diagnóstico provável: erro humano. Confirmando...",
-    "Consultando o manual que você não leu...", "Polindo a prataria enquanto o Wi-Fi decide se coopera...",
-    "Separando o que você pediu do que você quis dizer...", "Procurando o botão de desfazer da sua última ideia...",
-    "Calculando quantas vezes você vai ignorar este conselho...", "Fingindo surpresa com o mesmo erro de ontem...",
-    "Verificando se a culpa é do celular. Spoiler: raramente é...", "Reiniciando minha paciência. Ela também tem 3,8 GB...",
-    "Servindo a resposta com a dignidade de um mordomo...", "Todo mundo mente. Os logs, não...",
-    "Traduzindo sua mensagem do idioma 'pressa'...", "Executando. Torça, se isso te acalma...",
-    "Calibrando ironia para nível segunda-feira de manhã...", "Aceitando a missao. Recusando o otimismo...",
-    "Afirmativo. A parte difícil sou eu que faço, como sempre...", "Contando quantos apps você abriu hoje. Melhor não saber...",
-    "Sinceridade em 100%. Prepare-se...",
-]
+# 18/11/2026: as frases de giro vem do catalogo unico (~/.qwen/univo-status/frases-status.json, o mesmo do Hermes do PC);
+# a 1a frase de cada pedido sai do status_univo.cjs (patch do Qwen Code). Sem o catalogo, ficam as frases que ja estavam.
+try:
+    with open(os.path.join(os.path.expanduser("~"), ".qwen", "univo-status", "frases-status.json"), encoding="utf-8") as f:
+        _frases = [x + "…" for x in json.load(f)["rotacao"] if isinstance(x, str) and x.strip()]
+except (OSError, ValueError, KeyError, TypeError):
+    _frases = []
+if _frases:
+    ui["customWittyPhrases"] = _frases
 ui["hideTips"] = True
 dados["ui"] = ui
 novo = arq + ".novo"
@@ -488,6 +485,26 @@ ponte_instalar() {
     grep -Ev "^alias (qwen|qp|ql)=" "$HOME/.bashrc" > "$HOME/.bashrc.novo" && mv -f "$HOME/.bashrc.novo" "$HOME/.bashrc" \
       && echo "  [ok]  atalhos antigos (qwen, qp, ql) tirados do .bashrc: a IA e' o comando ia" || { echo "  [--]  nao consegui limpar o .bashrc"; erro=1; }
   else echo "  [ok]  .bashrc sem atalhos antigos: a IA e' o comando ia"; fi
+  # 18/11/2026: mensagens de status do Univo (catalogo unico com o Hermes do PC): frases de giro no customWittyPhrases e
+  # a 1a frase pelo assunto do pedido (patch pequeno no Qwen Code, com o original guardado; desfazer: status_univo.py qwen-patch desfazer)
+  S="$Q/univo-status"; mkdir -p "$S"
+  cat > "$S/.novo.status_univo.py" <<'@@FIM_STPY@@'
+@@STPY@@
+@@FIM_STPY@@
+  cat > "$S/.novo.status_univo.cjs" <<'@@FIM_STJS@@'
+@@STJS@@
+@@FIM_STJS@@
+  cat > "$S/.novo.frases-status.json" <<'@@FIM_STJSON@@'
+@@STJSON@@
+@@FIM_STJSON@@
+  if [ -s "$S/.novo.status_univo.py" ] && [ -s "$S/.novo.status_univo.cjs" ] && [ -s "$S/.novo.frases-status.json" ] \
+     && "$PY" -c 'import ast, json, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read()); json.load(open(sys.argv[2], encoding="utf-8"))' "$S/.novo.status_univo.py" "$S/.novo.frases-status.json" 2>/dev/null \
+     && { ! command -v node >/dev/null 2>&1 || node --check "$S/.novo.status_univo.cjs" >/dev/null 2>&1; }; then
+    for f in status_univo.py status_univo.cjs frases-status.json; do mv -f "$S/.novo.$f" "$S/$f"; done
+    echo "  [ok]  mensagens de status do Univo em ~/.qwen/univo-status (as mesmas do Hermes do PC)"
+    if "$PY" "$S/status_univo.py" qwen-patch aplicar > "$S/patch.log" 2>&1; then echo "  [ok]  1a frase de status pelo assunto do pedido: $(tail -n 1 "$S/patch.log")"
+    else echo "  [--]  1a frase pelo assunto nao ligada ($(tail -n 1 "$S/patch.log")); o giro de frases continua"; fi
+  else rm -f "$S"/.novo.*; echo "  [--]  as mensagens de status chegaram com erro (download cortado?): ficaram as anteriores"; erro=1; fi
   [ -e "$A/settings.json" ] || { [ -e "$Q/settings.json" ] && cp -p "$Q/settings.json" "$A/settings.json"; }
   "$PY" - "@@URL@@" <<'@@FIM_PY@@'
 @@MESCLA_PY@@
@@ -883,7 +900,7 @@ class Ponte:
         textos = self._arquivos_kit_celular()
         versao = self.kit_versao()
         delimitadores = {}
-        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("pedidos", "PED"), ("telemetria", "TEL"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
+        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("pedidos", "PED"), ("telemetria", "TEL"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("status_py", "STPY"), ("status_js", "STJS"), ("status_json", "STJSON"), ("mescla", "PY")):
             texto = _MESCLA_PY.rstrip("\n") if chave == "mescla" else textos[chave]
             delim = f"PONTE_FIM_{nome}_{hashlib.sha256(texto.encode('utf-8')).hexdigest()[:8].upper()}"
             if delim in texto.split("\n"):
@@ -894,6 +911,7 @@ class Ponte:
             "VERSAO": versao, "URL": url, "BLOCO_TOKEN": bloco_env,
             "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "LINK": textos["link"], "FIM_LINK": delimitadores["LINK"], "CTV": textos["controle_tv"], "FIM_CTV": delimitadores["CTV"], "PED": textos["pedidos"], "FIM_PED": delimitadores["PED"], "TEL": textos["telemetria"], "FIM_TEL": delimitadores["TEL"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
             "FIM_IA": delimitadores["IA"], "FIM_CAIXA": delimitadores["CAIXA"], "FIM_SAIDA": delimitadores["SAIDA"], "FIM_BOOT": delimitadores["BOOT"], "FIM_QWEN": delimitadores["QWEN"], "FIM_PY": delimitadores["PY"],
+            "STPY": textos["status_py"], "FIM_STPY": delimitadores["STPY"], "STJS": textos["status_js"], "FIM_STJS": delimitadores["STJS"], "STJSON": textos["status_json"], "FIM_STJSON": delimitadores["STJSON"],
         }
         return re.sub(r"@@([A-Z_]+)@@", lambda m: valores[m.group(1)], _MODELO_INSTALADOR)
 

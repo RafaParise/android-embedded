@@ -32,6 +32,7 @@ IA_FALSO = ("#!/data/data/com.termux/files/usr/bin/bash\n# ia falso\necho \"ia: 
 CAIXA_FALSO = "#!/data/data/com.termux/files/usr/bin/bash\necho \"caixa falso: $1\"\n"
 SAIDA_FALSO = "#!/data/data/com.termux/files/usr/bin/bash\necho \"saida falso: $1\" 'aspas' $HOME\n"
 BOOT_FALSO = "#!/data/data/com.termux/files/usr/bin/bash\n# boot falso\nsshd\n"
+STATUS_KIT = ("status/status_univo.py", "status/status_univo.cjs", "status/frases-status.json")
 QWEN_MD_FALSO = "# Instrucoes\n- fale em portugues: ação, coração\n- use `rg` e $VARIAVEL e \\n literal\n"
 
 
@@ -57,6 +58,8 @@ def mundo(tmp_path, importa_script):
     _escreve(kit / "bin" / "telemetria", "#!/usr/bin/env python3" + chr(10) + "print(3)" + chr(10))
     _escreve(kit / "boot" / "iniciar-a12", BOOT_FALSO)
     _escreve(kit / "QWEN.md", QWEN_MD_FALSO)
+    for rel in STATUS_KIT:   # os de status vao como estao no repositorio (o instalador confere sintaxe e JSON)
+        _escreve(kit / rel, (RAIZ / "scripts" / "celular-kit" / rel).read_text(encoding="utf-8"))
     _escreve(proj / "CLAUDE.md", "# p\n")
     relogio = [1_000_000.0]
     ponte = m.Ponte(proj, base)
@@ -177,7 +180,7 @@ def test_instalador_passa_no_bash_n_e_a_versao_confere(mundo):
 
 def test_versao_muda_quando_qualquer_arquivo_do_kit_muda(mundo):
     v0 = mundo.ponte.kit_versao()
-    for rel in ("bin/ia", "bin/caixa", "bin/saida", "bin/guarda", "bin/cel", "bin/memoria", "bin/link", "bin/controle-tv", "bin/pedidos", "bin/telemetria", "boot/iniciar-a12", "QWEN.md"):
+    for rel in ("bin/ia", "bin/caixa", "bin/saida", "bin/guarda", "bin/cel", "bin/memoria", "bin/link", "bin/controle-tv", "bin/pedidos", "bin/telemetria", "boot/iniciar-a12", "QWEN.md") + STATUS_KIT:
         arq = mundo.kit / rel
         antigo = arq.read_bytes()
         arq.write_bytes(antigo + b"# mudou\n")
@@ -540,7 +543,7 @@ def test_a_instalacao_real_do_repositorio_funciona_de_ponta_a_ponta(tmp_path, im
         rc, saida = celular.roda(ponte.instalador(TOKEN, URL), como="pipe")
         assert rc == 0, saida
         kit = RAIZ / "scripts" / "celular-kit"
-        for rel, destino in (("bin/ia", "bin/ia"), ("bin/caixa", "bin/caixa"), ("bin/saida", "bin/saida"), ("bin/guarda", "bin/guarda"), ("bin/cel", "bin/cel"), ("bin/memoria", "bin/memoria"), ("bin/link", "bin/link"), ("bin/controle-tv", "bin/controle-tv"), ("bin/pedidos", "bin/pedidos"), ("bin/telemetria", "bin/telemetria"), ("boot/iniciar-a12", ".termux/boot/iniciar-a12"), ("QWEN.md", ".qwen/QWEN.md")):
+        for rel, destino in (("bin/ia", "bin/ia"), ("bin/caixa", "bin/caixa"), ("bin/saida", "bin/saida"), ("bin/guarda", "bin/guarda"), ("bin/cel", "bin/cel"), ("bin/memoria", "bin/memoria"), ("bin/link", "bin/link"), ("bin/controle-tv", "bin/controle-tv"), ("bin/pedidos", "bin/pedidos"), ("bin/telemetria", "bin/telemetria"), ("boot/iniciar-a12", ".termux/boot/iniciar-a12"), ("QWEN.md", ".qwen/QWEN.md")) + tuple((r, ".qwen/univo-status/" + r.split("/")[1]) for r in STATUS_KIT):
             esperado = (kit / rel).read_bytes().decode("utf-8").replace("\r\n", "\n").rstrip("\n") + "\n"
             assert ler(celular.home / destino) == esperado, rel
         assert "[ok]  ponte do PC responde" in saida and "Pronto (kit " in saida
@@ -584,3 +587,6 @@ def test_tema_univo_so_verde_cinza_e_branco_e_frases_da_personalidade(mundo, cel
     assert cores <= {"#000000", "#0078D4", "#FFFFFF", "#B0B0B0", "#909090", "#3A3A3A"}, cores
     frases = " ".join(ui["customWittyPhrases"])
     assert "Compilando a realidade" not in frases and len(ui["customWittyPhrases"]) >= 15 and "Qwen" not in frases
+    catalogo = json.loads((RAIZ / "scripts" / "celular-kit" / "status" / "frases-status.json").read_text(encoding="utf-8"))
+    assert ui["customWittyPhrases"] == [f + "…" for f in catalogo["rotacao"]], "as frases de giro vem do catalogo unico (o mesmo do Hermes)"
+    assert (cel.home / ".qwen" / "univo-status" / "status_univo.cjs").is_file()
