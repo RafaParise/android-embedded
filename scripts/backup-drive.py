@@ -111,7 +111,7 @@ def ja_rodando(trava):
     if pid == os.getpid():
         return False
     if os.name == "nt":
-        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, errors="replace")
+        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
         return str(pid) in r.stdout
     return pathlib.Path(f"/proc/{pid}").exists()
 

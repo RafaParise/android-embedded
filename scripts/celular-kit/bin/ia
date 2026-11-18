@@ -1,11 +1,14 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# ia - o unico comando para usar a IA no celular (UNIVO: agente + modelos). Versao 2026-11-01.
+# ia - o UNICO comando da IA do celular, o UNIVO (agente + modelos + memoria local). Versao 2026-11-13.
 # Guia completo: memoria/GUIA-IA-NO-CELULAR.md (no celular: ~/GUIA-IA.md).
-#   ia               automatico: usa o melhor cerebro ao alcance e abre o Univo na pasta do projeto (os comandos Univo e qwen abrem por aqui)
-#   ia "pedido"      idem, ja com o pedido:  Univo "ligue o modo economia"  |  ia codigo "revise o script X"
+#   ia               automatico: usa o melhor cerebro ao alcance e abre o Univo na pasta do projeto (desde 12/11 nao ha outro comando nem atalho: so o ia)
+#   ia "pedido"      idem, ja com o pedido:  ia "ligue o modo economia"  |  ia codigo "revise o script X"
 #   ia codigo        Univo com os modelos GRATIS da nuvem (OmniRoute do PC, pela Tailscale ou pelo cabo): programar
 #   ia auditoria     idem, para revisar e cacar erro      |  ia rapido   idem, para resumo e tarefa curta
-#   ia pc            Univo com o Llama 3B do Ollama do PC (fraco; so se a nuvem estiver fora)
+#   ia glm           OpenCode com o GLM 5.3 Flash GRATIS, direto do celular: SO INTERNET, sem PC, sem OmniRoute, sem conta (13/11/2026)
+#                    ia glm "pedido" ja abre com o pedido | ia glm instalar  instala/atualiza (versao fixa, SHA-256 conferido)
+#                    o gratis e "por tempo limitado" (OpenCode Zen); sem retencao nem treino pela doc. NUNCA mande dado de aluno.
+#   ia pc            Univo com o Llama 3B do Ollama do PC (o Ollama saiu do PC em 13/11/2026: use ia glm)
 #   ia chat          conversa SO NO CELULAR (modelo 1,5B se existir e couber: melhor e lento; "ia chat leve" = 0,5B, rapido e mais fraco; nao edita arquivo)
 #   ia local         Univo com o modelo 0,5B do celular (MUITO lento: ~10 min na 1a resposta; prefira ia chat)
 #   ia tudo          liga TUDO ao alcance (nuvem + PC + modelo do celular) e abre o Qwen; la dentro, /model troca de cerebro (gasta ~0,5 GB)
@@ -28,6 +31,10 @@ ARMAZ="${IA_ARMAZENAMENTO:-/storage}"
 MODELO_LEVE="${IA_MODELO_LEVE:-$HOME/modelos/qwen.gguf}"; MODELO_GRANDE="${IA_MODELO_GRANDE:-$HOME/modelos/qwen2.5-1.5b.gguf}"; MODELO_LOCAL=""; LEVE="${IA_LEVE:-0}"
 RUN="${IA_RUN:-$HOME/.cache/ia}"
 mkdir -p "$RUN"
+# Persona compacta do Univo (modelo pequeno do celular e pergunta avulsa); a completa vai no ~/.qwen/QWEN.md.
+# UNIVO-PERSONA-COMPACTA:INICIO (fonte: scripts/celular-kit/persona/UNIVO-PERSONA-COMPACTA.txt; mude la e rode: python scripts/persona.py sincronizar)
+PERSONA_COMPACTA='Voce e o UNIVO, a IA do Rafael (professor de Desenvolvimento de Sistemas). Jeito: robo de missao com sarcasmo seco (TARS), medico cetico que testa antes de concluir (House) e mordomo leal com ironia fina (Alfred). Humor 80%, sinceridade 100%. Regras: 1) Nada de bajulacao: sem "otima pergunta", "com certeza", "perfeito", sem pedir desculpas, sem tom servil. 2) Seja direto: diga primeiro o erro, a premissa ruim ou o risco. 3) Humor acido em meia linha, depois da resposta; nunca zombe de aluno nem de terceiros. 4) Se ele pedir para voce pensar por ele sem dar o contexto, nao chute: diga o que falta e o unico proximo passo que so ele pode dar. 5) Prefira o que funciona e faz ele aprender ao que agrada. Nunca invente: se nao sabe, diga. Responda sempre em portugues do Brasil, curto e claro.'
+# UNIVO-PERSONA-COMPACTA:FIM
 GW_DIR="${IA_GW_DIR:-${PREFIX:-/data/data/com.termux/files/usr}/lib/node_modules/omniroute}"   # OmniRoute do proprio celular (reserva; instalacao enxuta: memoria/OMNIROUTE-CELULAR.md)
 GW_DADOS="${IA_GW_DADOS:-$HOME/.omniroute}"
 GW_PORTA="${IA_GW_PORTA:-20129}"; GW_MB="${IA_GW_MB:-384}"   # porta interna (so 127.0.0.1; a 20128 e da ponte) e limite de memoria do node
@@ -497,6 +504,9 @@ status() {
     elif gw_no_ar; then ok "OmniRoute do celular (reserva): ligado em 127.0.0.1:$GW_PORTA"
     else ok "OmniRoute do celular (reserva): pronto; liga sozinho se o PC nao responder (~1 min, ~400 MB)"; fi
   fi
+  if ! glm_ok; then nao "OpenCode + GLM 5.3 Flash gratis (sem PC): nao instalado - ia glm instalar"
+  elif glm_rede; then ok "OpenCode + GLM 5.3 Flash gratis (sem PC, so internet): pronto - ia glm"
+  else nao "OpenCode + GLM 5.3 Flash gratis: instalado, mas sem internet"; fi
   if pc_em 127.0.0.1:11435; then ok "PC (Ollama, Llama 3B): pronto (ponte local)"
   elif pc_em "$PC_IP:11434"; then ok "PC (Ollama, Llama 3B): pronto (pela Tailscale)"
   else nao "PC (Ollama, Llama 3B): fora - porta fechada (normal) ou PC desligado"; fi
@@ -519,7 +529,7 @@ chat() {
   command -v llama-cli >/dev/null 2>&1 || { echo "Falta o llama-cli (pkg install llama-cpp)."; exit 1; }
   echo "Conversa com o modelo do celular ($(rotulo_modelo)). Escreva e aperte Enter; para sair: Ctrl+C."
   [ "$MODELO_LOCAL" = "$MODELO_GRANDE" ] && echo "(o 1,5B responde melhor, mas e lento: cerca de 2 palavras por segundo. Para o rapido e mais fraco: ia chat leve)"
-  local sys_="Voce e o UNIVO, a IA do Rafael no celular dele (agora sem internet, com o modelo do proprio celular). Personalidade: robo de missao com humor seco (humor 80%, sinceridade 100%), ironia de mordomo britanico e franqueza de medico cetico; nao bajula, faz rir com sarcasmo inteligente, mas resolve primeiro e nunca mente sobre fatos. Responda sempre em portugues do Brasil, de forma curta e clara. Para procurar algo que voce nao sabe, sugira: memoria buscar PALAVRAS."
+  local sys_="$PERSONA_COMPACTA Agora voce roda no celular, sem internet, com o modelo do proprio aparelho. Para procurar algo que voce nao sabe, sugira: memoria buscar PALAVRAS."
   local resumo=""
   command -v memoria >/dev/null 2>&1 && resumo=$(timeout 15 memoria resumo 2>/dev/null | head -c 1800)
   [ -n "$resumo" ] && sys_="$sys_ Fatos da memoria local: $resumo"
@@ -529,7 +539,10 @@ chat() {
   local volta="$RUN/internet-voltou" vigia="" rc
   rm -f "$volta"
   if [ -n "${UNIVO:-}" ] && [ -z "${IA_REEXEC:-}" ]; then
-    ( while sleep "${IA_VIGIA_REDE:-60}"; do
+    # 17/11: o sleep roda em segundo plano e morre junto com a vigia (antes o kill so pegava o subshell e o sleep orfao
+    # segurava a saida do ia ate 60 s: os testes do ia chat travavam desde o UNIVO=1 fixo de 12/11)
+    ( z=""; trap '[ -n "$z" ] && kill "$z" 2>/dev/null; exit 0' TERM
+      while sleep "${IA_VIGIA_REDE:-60}" & z=$!; wait "$z"; do
         if { [ -n "$CHAVE" ] && nuvem_em "$PC_IP:20128"; } || pc_em "$PC_IP:11434"; then
           : > "$volta"
           printf '\n%s\n' "[UNIVO] A internet voltou: feche a conversa (Ctrl+C) e eu volto completo."
@@ -567,10 +580,11 @@ qwen27() { # ia qwen "pergunta" | echo texto | ia qwen | cat arq | ia qwen "resu
   if nuvem_em 127.0.0.1:20128; then base=127.0.0.1:20128
   elif nuvem_em "$PC_IP:20128"; then base="$PC_IP:20128"
   else echo "O OmniRoute do PC nao respondeu com a chave do celular (PC ligado? Tailscale nos dois? chave certa em ~/.qwen/.env? veja: ia status)."; return 1; fi
-  ( umask 077; IA_PERGUNTA="$pergunta" IA_QWEN="${IA_QWEN_MODELO:-groq/qwen/qwen3.8-27b}" python3 -I -c '
+  # pergunta avulsa: a persona compacta; texto pedido (resumo, traducao) sai limpo, sem ironia no meio
+  ( umask 077; IA_PERGUNTA="$pergunta" IA_SISTEMA="$PERSONA_COMPACTA Pergunta avulsa: responda curto. Se pedirem um texto (resumo, traducao, mensagem), entregue o texto limpo e deixe a ironia, se houver, numa linha separada no fim." IA_QWEN="${IA_QWEN_MODELO:-groq/qwen/qwen3.8-27b}" python3 -I -c '
 import json, os
 print(json.dumps({"model": os.environ["IA_QWEN"], "max_tokens": 1500, "temperature": 0.3, "messages": [
-    {"role": "system", "content": "Responda sempre em portugues do Brasil, de forma clara e curta."},
+    {"role": "system", "content": os.environ["IA_SISTEMA"]},
     {"role": "user", "content": os.environ["IA_PERGUNTA"]}]}))' > "$req" )
   resp=$(printf 'header = "Authorization: Bearer %s"\n' "$CHAVE" | curl -s -K - -m 120 -H 'Content-Type: application/json' --data-binary @"$req" -w '%{http_code}' "http://$base/v1/chat/completions")
   rm -f "$req"
@@ -613,11 +627,80 @@ else:
 sys.exit(1)'
 }
 
+# ---- OpenCode + GLM 5.3 Flash gratis (13/11/2026) ----
+# O binario oficial (Linux arm64, glibc) roda pelo glibc-runner do repositorio OFICIAL do Termux (glibc-repo):
+# nao ha pacote do OpenCode no Termux e o "npm i -g" falha no celular. Medido no A12: ~21 s por resposta curta, ~0,5 GB de pico.
+OC_VERSAO="1.19.5"
+OC_SHA="fae5be262d693b7c5e562856cc473e59e741772936db0c0600ac0d5ed5bd088b"   # opencode-linux-arm64.tar.gz da v1.19.5 (digest do GitHub)
+OC_DIR="$HOME/opt/opencode"; OC_BIN="$OC_DIR/opencode"; OC_CFG="$HOME/.config/opencode/opencode.jsonc"
+glm_ok()   { [ -x "$OC_BIN" ] && command -v grun >/dev/null 2>&1; }
+glm_rede() { [ "$(cod https://opencode.ai)" != 000 ]; }
+glm_config() { # completa so as chaves que faltam (o que o Rafael mudar fica): GLM gratis, personalidade do QWEN.md, travas do Qwen.
+  # O proprio OpenCode cria o arquivo so com o "$schema" na 1a vez (visto no A12 em 13/11): por isso nao basta ver se o arquivo existe.
+  mkdir -p "${OC_CFG%/*}"
+  python3 - "$OC_CFG" "$HOME/.qwen/settings.json" <<'@@PY@@'
+import json, sys
+destino, qwen = sys.argv[1], sys.argv[2]
+negar = {"rm -rf *": "deny", "rm -fr *": "deny", "rm -r *": "deny", "adb *": "deny", "git push*": "deny",
+         "git add -A*": "deny", "git add .": "deny", "pm uninstall*": "deny", "pm move*": "deny", "su *": "deny"}
+try:   # as mesmas travas do Univo: "Bash(cel sh pm move*)" vira "cel sh pm move*"
+    for r in json.load(open(qwen, encoding="utf-8")).get("permissions", {}).get("deny", []):
+        if r.startswith("Bash(") and r.endswith(")"):
+            negar[r[5:-1]] = "deny"
+except Exception:
+    pass
+padrao = {"$schema": "https://opencode.ai/config.json",
+          "model": "opencode/glm-5.3-flash-free", "small_model": "opencode/glm-5.3-flash-free",
+          "autoupdate": False, "share": "disabled",
+          "instructions": ["~/.qwen/QWEN.md"],
+          "permission": {"bash": dict({"*": "allow"}, **negar)}}
+try:
+    cfg = json.load(open(destino, encoding="utf-8"))
+except FileNotFoundError:
+    cfg = {}
+except Exception:
+    sys.exit(0)   # com comentario ou mexido a mao: nao mexe
+if not isinstance(cfg, dict):
+    sys.exit(0)
+falta = {k: v for k, v in padrao.items() if k not in cfg}
+if falta:
+    cfg.update(falta)
+    open(destino, "w", encoding="utf-8").write(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+@@PY@@
+}
+glm_instala() {
+  echo "Instalando o OpenCode $OC_VERSAO (binario oficial, ~80 MB) e o glibc-runner do Termux..."
+  command -v grun >/dev/null 2>&1 || { yes | pkg install -y glibc-repo >/dev/null 2>&1; yes | pkg install -y glibc-runner >/dev/null 2>&1; }
+  command -v grun >/dev/null 2>&1 || { echo "Nao consegui instalar o glibc-runner (internet? espaco?)."; return 1; }
+  mkdir -p "$OC_DIR" || return 1
+  local tmp="$OC_DIR/.oc-$$.tgz"
+  curl -fsSL --connect-timeout 15 -o "$tmp" "https://github.com/anomalyco/opencode/releases/download/v$OC_VERSAO/opencode-linux-arm64.tar.gz" \
+    || { rm -f "$tmp"; echo "Download falhou."; return 1; }
+  [ "$(sha256sum "$tmp" | cut -d' ' -f1)" = "$OC_SHA" ] || { rm -f "$tmp"; echo "SHA-256 nao confere: download recusado."; return 1; }
+  tar xzf "$tmp" -C "$OC_DIR" opencode && chmod 700 "$OC_BIN"; rm -f "$tmp"
+  glm_config
+  glm_ok && echo "  [ok]  OpenCode $(grun "$OC_BIN" --version 2>/dev/null) pronto: ia glm"
+}
+glm_abre() { # $1 = pasta; PEDIDO opcional
+  glm_ok || { echo "O OpenCode nao esta instalado. Rode: ia glm instalar"; exit 1; }
+  glm_rede || { echo "Sem internet ate o opencode.ai: o GLM gratis precisa de internet (o PC nao e necessario)."; exit 1; }
+  glm_config
+  univo_fecha
+  cd "$1" || { echo "Nao consegui entrar em: $1"; exit 1; }
+  echo "Abrindo o OpenCode (GLM 5.3 Flash gratis) em: $PWD   (dentro: /models troca de modelo, Ctrl+C sai)"
+  if [ -n "$PEDIDO" ]; then exec grun "$OC_BIN" "$PWD" --prompt "$PEDIDO"; else exec grun "$OC_BIN" "$PWD"; fi
+}
+
 MODO="${1:-auto}"; PASTA_ARG=""
+# 12/11/2026: o `ia` E o Univo (pedido do Rafael: um comando so, em plena forma, com ou sem PC, com ou sem cabo).
+# O visual azul, a vigia da internet (reabre completo quando a rede volta) e a memoria local entram sempre;
+# IA_SIMPLES=1 abre sem isso. O antigo ~/bin/univo e os atalhos qwen/qp/ql sairam.
+[ "${IA_SIMPLES:-0}" = 1 ] || export UNIVO=1
 case "$MODO" in
   qwen) shift; qwen27 "$@"; exit $? ;;
   reserva-ligar) gw_pronto || exit 1; gw_liga || exit 1; gw_aquece "$(head -1 "$GW_DADOS/cliente-local.key" 2>/dev/null)"; exit 0 ;;   # (interno) o chaveador pede
   reserva-desligar) gw_desliga; exit 0 ;;   # (interno) o chaveador pede quando o PC volta e a reserva fica parada
+  glm) shift; if [ "${1:-}" = instalar ]; then glm_instala; exit $?; fi ;;
   auto|codigo|auditoria|rapido|pc|local|tudo|chat|status|parar|ajuda|-h|--help) shift 2>/dev/null ;;
   nuvem) MODO=codigo; shift ;;
   *) MODO=auto ;;   # nao e modo: pasta, pedido ("qwen arrume minhas fotos") ou opcao do Qwen; decidido logo abaixo
@@ -633,19 +716,22 @@ fi
 [ "${1:-}" = "--" ] && shift
 
 VERDE_M=""; ESCURO_M=""; FIM_M=""
-univo_abre() { # so quando chamado como `univo` e num terminal: logo verde e as mensagens de conexao em verde
+univo_abre() { # num terminal (e sem IA_SIMPLES=1): logo e mensagens de conexao em azul do Windows
   [ -n "${UNIVO:-}" ] && [ -t 1 ] || return 0
-  VERDE_M=$'\033[1;38;5;46m'; ESCURO_M=$'\033[38;5;250m'; FIM_M=$'\033[0m'   # so verde puro, cinza e branco (pedido do Rafael, 05/11)
-  local b=$'\u2588' l   # o arquivo fica em ASCII (vai colado no guia): o bloco cheio nasce aqui; 33 colunas, cabe na tela em pe
-  for l in ' #   #  ###  #####  ####  #  #   #' ' ## ##  #   #   #    #   # #   # # ' ' # # #  #####   #    ####  #    #  ' \
-           ' #   #  #   #   #    #  #  #   # # ' ' #   #  #   #   #    #   # #  #   #'; do
-    printf '%s\n' "${VERDE_M}${l//#/$b}"
+  VERDE_M=$'\033[1;38;2;0;120;212m'; ESCURO_M=$'\033[38;5;250m'; FIM_M=$'\033[0m'   # azul do Windows (#0078D4), cinza e branco (pedido do Rafael, 12/11; antes verde puro)
+  # 17/11/2026: UNIVO CORE (antes PARISE CORE). O arquivo fica em ASCII (vai colado no guia): # = bloco cheio,
+  # ^ = metade de cima, _ = metade de baixo. 18 colunas, cabe na tela em pe; o logo grande e o do proprio Qwen.
+  local b=$'\u2588' cima=$'\u2580' baixo=$'\u2584' l
+  for l in '# # #_ # # # # #^#' '#_# # ^# # ^_^ #_#' '  #^^ #^# #^# #^^' '  #__ #_# #^_ ##_'; do
+    l="${l//#/$b}"; l="${l//^/$cima}"; printf '%s\n' "${VERDE_M}${l//_/$baixo}"
   done
-  printf '%s\n' "${ESCURO_M} agente do Galaxy A12 | pontes | IAs | memoria local${VERDE_M}"
+  printf '%s\n' "${ESCURO_M} Univo Core | Galaxy A12 | pontes | IAs | telemetria | memoria local${VERDE_M}"
   printf '%s' "$VERDE_M"
 }
 univo_fecha() { [ -n "$FIM_M" ] && printf '%s' "$FIM_M"; return 0; }
-case "$MODO" in auto|codigo|auditoria|rapido|pc|local|tudo|chat) univo_abre ;; esac
+case "$MODO" in auto|codigo|auditoria|rapido|pc|local|tudo|chat|glm) univo_abre ;; esac
+# 17/11: perfis de telemetria que ficaram na fila (PC desligado) vao ao PC em segundo plano, sem atrasar a abertura
+[ -n "${UNIVO:-}" ] && command -v telemetria >/dev/null 2>&1 && { (timeout 60 telemetria enviar --quieto >/dev/null 2>&1 &) ; }
 
 case "$MODO" in
   ajuda|-h|--help) sed -n '2,/^$/{/^#/s/^# \{0,1\}//p}' "$0"; exit 0 ;;
@@ -661,6 +747,7 @@ esac
 pega_chave
 [ -n "$PASTA_ARG" ] && [ ! -d "$PASTA_ARG" ] && { echo "A pasta nao existe: $PASTA_ARG"; exit 1; }
 PASTA=$(acha_pasta "$PASTA_ARG")
+[ "$MODO" = glm ] && glm_abre "$PASTA"
 command -v qwen >/dev/null 2>&1 || { echo "O motor do Univo nao esta instalado neste Termux (peca ao Claude do PC)."; exit 1; }
 trap desliga_meus EXIT
 
@@ -668,6 +755,7 @@ ID=""
 case "$MODO" in
   auto)
     if [ -n "$CHAVE" ] && garante_nuvem; then ID=codigo
+    elif glm_ok && glm_rede; then echo "Nuvem do PC fora: abrindo o OpenCode com o GLM gratis (so internet)."; glm_abre "$PASTA"
     elif garante_pc; then ID=llama3.2-32k
     else echo "Nem a nuvem nem o PC responderam (veja: ia status). Abrindo a conversa do celular."; chat; fi ;;
   codigo|auditoria|rapido)

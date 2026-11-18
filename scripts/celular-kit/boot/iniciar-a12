@@ -12,6 +12,14 @@ mkdir -p "$HOME/.cache/saida"
   g=$(saida guarda 2>&1); rc=$?   # rc 1 = saida nao pedida (nada a vigiar) ou guarda que nao subiu: o texto de $g diz qual
   echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $s; guarda: rc=$rc $(printf '%s' "$g" | tr '\n' ' ')"
   command -v guarda >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: vigia de arquivos: $(guarda ligar 2>&1 | tr '\n' ' ')"
+  # repasse do ARENA (10/11/2026): partida entre casas pelo codigo de 6 numeros; so sobe se estiver instalado
+  [ -f "$HOME/arena-repasse/repasse_proprio.py" ] && command -v repasse >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $(repasse ligar 2>&1)"
+  # sentinela do univo-sync (12/11/2026): a saude deste celular, uma amostra por minuto; so sobe se estiver instalado
+  [ -f "$HOME/univo-sync/sentinela_a12.py" ] && command -v sentinela >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $(sentinela ligar 2>&1)"
+  # ligar o PC de longe pelo Tailscale (Wake-on-LAN, 13/11/2026); so sobe com o ligar-pc instalado e a conf com a chave
+  [ -f "$HOME/univo-sync/ligar_pc.py" ] && command -v ligar-pc >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $(ligar-pc servir-ligar 2>&1)"
+  # vigia da TV (12/11/2026): captura de tela ativa = celular na proporcao da TV; parou = volta
+  command -v cel >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $(cel tv vigia ligar 2>&1 | head -n 1)"
 } >> "$LOG" 2>&1
 # memoria do Univo: se alimenta sozinha (aparelho, apps, rotina, projetos do cartao e, com o PC no ar, o que o Claude fez)
 alimenta() { command -v memoria >/dev/null 2>&1 && nice -n 15 timeout 600 memoria atualizar --auto >/dev/null 2>&1; }
@@ -24,4 +32,8 @@ while :; do
   pgrep -x sshd >/dev/null 2>&1 || sshd
   saida guarda >/dev/null 2>&1
   command -v guarda >/dev/null 2>&1 && guarda ligar >/dev/null 2>&1
+  [ -f "$HOME/arena-repasse/repasse_proprio.py" ] && command -v repasse >/dev/null 2>&1 && repasse ligar >/dev/null 2>&1
+  [ -f "$HOME/univo-sync/sentinela_a12.py" ] && command -v sentinela >/dev/null 2>&1 && sentinela ligar >/dev/null 2>&1
+  [ -f "$HOME/univo-sync/ligar_pc.py" ] && command -v ligar-pc >/dev/null 2>&1 && ligar-pc servir-ligar >/dev/null 2>&1
+  command -v cel >/dev/null 2>&1 && cel tv vigia ligar >/dev/null 2>&1
 done

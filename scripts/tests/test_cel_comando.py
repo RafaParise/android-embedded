@@ -27,6 +27,10 @@ case "$1" in
         *"#VG-TELA"*) [ -f "$FALSO_DIR/tela_apagada" ] && echo "  mWakefulness=Asleep" || echo "  mWakefulness=Awake" ;;
         *"#VG-BLOQ"*) [ -f "$FALSO_DIR/bloqueado_vg" ] && echo "isKeyguardShowing=true" ;;
         *"input keyevent 224"*) rm -f "$FALSO_DIR/tela_apagada" ;;
+        *"dumpsys media_projection"*) echo "MEDIA PROJECTION MANAGER (dumpsys media_projection)"; echo "Media Projection: "
+                                      [ -f "$FALSO_DIR/capturando" ] && echo "  MediaProjection{uid=10234 pkg=info.dvkr.screenstream}" || echo null ;;
+        *"wm size"*) [ -f "$FALSO_DIR/forcado" ] && { echo "Physical size: 720x1600"; echo "Override size: $(cat "$FALSO_DIR/forcado")"; } || echo "Physical size: 720x1600"
+                     case "$*" in *"wm size reset"*) rm -f "$FALSO_DIR/forcado" ;; *"wm size "*) echo "${*##*wm size }" > "$FALSO_DIR/forcado" ;; esac ;;
         *"windowingMode 5 -n net.sourceforge.opencamera"*) [ -f "$FALSO_DIR/oc_falha" ] || touch "$FALSO_DIR/camera_aberta" ;;
         *"am force-stop net.sourceforge.opencamera"*) rm -f "$FALSO_DIR/camera_aberta" "$FALSO_DIR/gravando" ;;
         *"input keyevent 24"*)
@@ -213,6 +217,49 @@ def test_tv_abre_o_screenstream(cel):
     _conectado(cel)
     rc, s = cel.roda("tv")
     assert "info.dvkr.screenstream" in cel.registro() and "ScreenStream" in s and "CAST_SETTINGS" not in cel.registro()
+
+
+def test_tv_vigia_molda_na_captura_e_volta_quando_para(cel, tmp_path):
+    """12/11/2026: captura de tela ativa (media_projection) = 720x1280; parou = reset conferido. Duas voltas rapidas."""
+    import subprocess as sp
+    _conectado(cel)
+    marca = tmp_path / "home" / ".cache" / "cel-tv-cheia"
+    (tmp_path / "capturando").write_text("")
+    env = {"HOME": str(tmp_path / "home"), "FALSO_LOG": str(tmp_path / "log"), "FALSO_DIR": str(tmp_path),
+           "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin", "CEL_TV_INTERVALO": "0.2"}
+    p = sp.Popen(["/bin/bash", str(SCRIPT), "tv", "vigia", "vigiar"], env=env, stdout=sp.PIPE, stderr=sp.STDOUT, text=True)
+    import time
+    for _ in range(50):
+        if (tmp_path / "forcado").exists():
+            break
+        time.sleep(0.1)
+    assert (tmp_path / "forcado").read_text().strip() == "720x1280" and marca.read_text().strip() == "720x1280"
+    (tmp_path / "capturando").unlink()
+    for _ in range(50):
+        if not (tmp_path / "forcado").exists():
+            break
+        time.sleep(0.1)
+    p.kill()
+    saida = p.communicate()[0]
+    assert not (tmp_path / "forcado").exists() and not marca.exists()
+    assert "captura de tela ativa: celular em 720x1280" in saida and "de volta a 720x1600" in saida
+
+
+def test_tv_cheia_poe_16_por_9_e_normal_volta_e_confere(cel, tmp_path):
+    """12/11/2026: a tela sem fio 100% preenchida; o voltar e conferido e o proximo `cel tv` desfaz o que sobrou."""
+    _conectado(cel)
+    marca = tmp_path / "home" / ".cache" / "cel-tv-cheia"
+    rc, s = cel.roda("tv", "cheia")
+    assert rc == 0 and "SHELL wm size 720x1280" in cel.registro() and marca.read_text().strip() == "720x1280" and "100%" in s
+    rc, s = cel.roda("tv", "cheia", "4:3")
+    assert "SHELL wm size 720x960" in cel.registro() and marca.read_text().strip() == "720x960"
+    rc, s = cel.roda("tv", "cheia", "torto")
+    assert rc == 2
+    rc, s = cel.roda("tv", "normal")
+    assert rc == 0 and "SHELL wm size reset" in cel.registro() and not marca.exists() and "normal" in s
+    marca.write_text("720x1280\n")
+    rc, s = cel.roda("tv")
+    assert "voltando ao normal primeiro" in s and not marca.exists() and cel.registro().count("SHELL wm size reset") == 2
 
 
 def test_status_sem_conexao_nao_quebra(cel):

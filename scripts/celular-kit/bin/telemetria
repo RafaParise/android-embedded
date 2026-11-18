@@ -1,0 +1,638 @@
+#!/data/data/com.termux/files/usr/bin/python3
+"""telemetria - o Univo Core mede aparelhos (hardware, software, rede e o que o ARENA precisa), sem dado pessoal.
+
+  telemetria                         mede ESTE aparelho e manda ao PC (o mesmo que: telemetria coletar este)
+  telemetria coletar [este|android|pc] [--rotulo TEXTO] [--rapido]
+        este     o proprio aparelho (o A12 no Termux; no PC, o proprio PC)
+        android  OUTRO Android pelo adb: no PC, cabo USB com a depuracao permitida no celular; no Termux,
+                 a depuracao sem fio pareada antes (telemetria parear) ou um aparelho que o adb ja enxergue
+        pc       o computador onde o comando roda (no Termux: explica como medir um PC)
+        --rapido pula os testes de velocidade (CPU e disco, ~5 s)
+  telemetria parear IP:PORTA CODIGO   pareia a "depuracao sem fio" de outro Android (11 ou mais, mesma rede)
+  telemetria enviar [--quieto]       manda ao PC (ponte, pela Tailscale) os perfis da fila; PC desligado nao perde nada
+  telemetria listar | ver ID | resumo | regras
+  telemetria importar ARQUIVO.json   traz um perfil feito pelo Univo-telemetria-pc.ps1 (pen drive, Download)
+  telemetria script-pc               grava o Univo-telemetria-pc.ps1 (mede PC com Windows sem Python)
+
+So entra a lista FECHADA de hardware, software e rede de `telemetria regras`. Nunca: numero de serie, IMEI, MAC,
+nome de rede (SSID/BSSID), IP, conta, telefone, contato, nome de app, arquivo, localizacao ou nome de pessoa.
+Cada perfil ganha um id aleatorio que nao identifica o aparelho. Pedido do Rafael em 17/11/2026: perfis de aparelhos
+diferentes para as IAs compararem e se prepararem para problemas diferentes (a IA consulta; nao e treino de modelo).
+"""
+import base64
+import hashlib
+import json
+import os
+import pathlib
+import platform
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+import uuid
+
+VERSAO = 1
+TERMUX = os.environ.get("PREFIX", "").startswith("/data/data/com.termux")
+WINDOWS = os.name == "nt"
+if TERMUX:
+    BASE = pathlib.Path.home() / "kit" / "telemetria"
+else:
+    BASE = pathlib.Path(os.environ.get("UNIVO_TELEMETRIA_DIR", r"C:\Projetos\univo-sync\memoria\telemetria\perfis"
+                                       if WINDOWS else str(pathlib.Path.home() / ".univo-telemetria")))
+FILA, ENVIADOS = BASE / "fila", BASE / "enviados"
+PC_IP = os.environ.get("IA_PC_IP", "100.64.0.1")
+PONTE = os.environ.get("PONTE_URL", f"http://{PC_IP}:20130")
+MAX_PERFIL = 48 * 1024
+
+# Propriedades do Android que podem entrar (lista FECHADA). ro.serialno, ro.boot.serialno, IMEI etc. nunca sao pedidas.
+PROPS = {
+    "fabricante": "ro.product.manufacturer", "marca": "ro.product.brand", "modelo": "ro.product.model",
+    "codinome": "ro.product.device", "plataforma": "ro.board.platform", "hardware": "ro.hardware",
+    "abis": "ro.product.cpu.abilist", "android": "ro.build.version.release", "sdk": "ro.build.version.sdk",
+    "patch_seguranca": "ro.build.version.security_patch", "one_ui": "ro.build.version.oneui",
+    "api_de_fabrica": "ro.product.first_api_level", "opengles": "ro.opengles.version", "vulkan": "ro.hardware.vulkan",
+    "egl": "ro.hardware.egl", "densidade": "ro.sf.lcd_density", "heap_app": "dalvik.vm.heapsize",
+    "pouca_ram": "ro.config.low_ram", "tipo_build": "ro.build.type",
+}
+SECOES = {"univo_telemetria", "id", "quando", "alvo", "origem", "rotulo", "aparelho", "cpu", "memoria", "armazenamento",
+          "tela", "gpu", "bateria", "rede", "software", "testes", "arena", "avisos"}
+
+# O que NUNCA pode aparecer num perfil (conferido no fim, antes de gravar ou enviar; a ponte do PC confere de novo).
+PRIVADO = [
+    (re.compile(r"\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "MAC"),
+    (re.compile(r"(?<![\d.])\d{15}(?![\d.])"), "IMEI"),
+    (re.compile(r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"), "IP"),
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "e-mail"),
+    (re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b"), "CPF"),
+    (re.compile(r"(?i)\b(ssid|bssid|serial|serialno|imei|meid|iccid|imsi|android_id|mac_address|telefone|phone)\b"), "identificador"),
+]
+
+
+def privado(texto):
+    """Devolve o nome do primeiro dado proibido achado no texto, ou None."""
+    for regra, nome in PRIVADO:
+        if regra.search(texto):
+            return nome
+    return None
+
+
+def roda(cmd, prazo=20, entrada=None):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=prazo, input=entrada,
+                           encoding="utf-8", errors="replace")
+        return r.stdout if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def num(texto, padrao=None):
+    m = re.search(r"-?\d+(?:[.,]\d+)?", str(texto or ""))
+    return float(m.group().replace(",", ".")) if m else padrao
+
+
+def versao_gles(valor):
+    try:
+        v = int(valor)
+        return f"{v >> 16}.{v & 0xFFFF}"
+    except (TypeError, ValueError):
+        return None
+
+
+# ------------------------------------------------------------------ medicoes que valem para qualquer alvo
+def latencia_tcp(host="1.1.1.1", porta=443, vezes=3):
+    """Connect bloqueante (no Windows, com prazo o select soma ~10 ms; licao da univo-sync)."""
+    amostras = []
+    for _ in range(vezes):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.settimeout(None if WINDOWS else 3)
+            t = time.perf_counter()
+            s.connect((host, porta))
+            amostras.append(round((time.perf_counter() - t) * 1000, 1))
+        except OSError:
+            pass
+        finally:
+            s.close()
+    return {"internet_ms_min": min(amostras), "internet_ms_mediana": sorted(amostras)[len(amostras) // 2]} if amostras else {"internet": "sem resposta"}
+
+
+def teste_cpu(segundos=1.5):
+    """SHA-256 de 1 MiB em laco: MB/s de UM nucleo (regua simples para comparar aparelhos)."""
+    bloco, feitos, fim = b"\0" * (1 << 20), 0, time.perf_counter() + segundos
+    t0 = time.perf_counter()
+    while time.perf_counter() < fim:
+        hashlib.sha256(bloco).digest()
+        feitos += 1
+    return round(feitos / (time.perf_counter() - t0), 1)
+
+
+def teste_disco(pasta, mb=32):
+    """Grava e le mb MiB com fsync numa pasta do proprio comando; apaga no fim."""
+    pasta.mkdir(parents=True, exist_ok=True)
+    arq, bloco = pasta / ".teste-disco.tmp", os.urandom(1 << 20)
+    try:
+        t = time.perf_counter()
+        with open(arq, "wb") as f:
+            for _ in range(mb):
+                f.write(bloco)
+            f.flush()
+            os.fsync(f.fileno())
+        escrita = mb / (time.perf_counter() - t)
+        t = time.perf_counter()
+        with open(arq, "rb") as f:
+            while f.read(1 << 20):
+                pass
+        leitura = mb / (time.perf_counter() - t)  # pode vir do cache: vale como teto
+        return {"escrita_mb_s": round(escrita, 1), "leitura_mb_s_cache": round(leitura, 1)}
+    except OSError as e:
+        return {"erro": type(e).__name__}
+    finally:
+        try:
+            arq.unlink()
+        except OSError:
+            pass
+
+
+def meminfo(texto):
+    d = {}
+    for linha in texto.splitlines():
+        k, _, v = linha.partition(":")
+        if k in ("MemTotal", "MemAvailable", "SwapTotal", "SwapFree"):
+            d[k] = int(num(v, 0)) // 1024
+    return {"total_mb": d.get("MemTotal"), "livre_mb": d.get("MemAvailable"), "swap_mb": d.get("SwapTotal"),
+            "swap_livre_mb": d.get("SwapFree")}
+
+
+def cpuinfo(texto, freqs_khz):
+    nucleos = len(re.findall(r"(?m)^processor\s*:", texto))
+    nome = (re.search(r"(?m)^(?:Hardware|model name)\s*:\s*(.+)$", texto) or [None, None])[1]
+    mhz = sorted({int(f) // 1000 for f in freqs_khz if str(f).strip().isdigit()}, reverse=True)
+    return {"nome": (nome or "").strip()[:80] or None, "nucleos": nucleos or None, "mhz_max_por_grupo": mhz or None}
+
+
+# ------------------------------------------------------------------ Android: este (Termux) ou outro (adb)
+def props_locais():
+    return {nome: roda(["getprop", chave], 5).strip() for nome, chave in PROPS.items()}
+
+
+def adb(serial, comando, prazo=30):
+    return roda(["adb", "-s", serial, "shell", comando], prazo)
+
+
+def props_adb(serial):
+    laco = "; ".join(f"echo {nome}=$(getprop {chave})" for nome, chave in PROPS.items())
+    saida = adb(serial, laco)
+    return {k: v.strip() for k, _, v in (l.partition("=") for l in saida.splitlines()) if k in PROPS}
+
+
+def termux_api(cmd):
+    if not shutil.which(cmd):
+        return {}
+    try:
+        return json.loads(roda(["timeout", "15", cmd], 20) or "{}")
+    except ValueError:
+        return {}
+
+
+def interfaces_ativas():
+    raiz = pathlib.Path("/sys/class/net")
+    ativas = []
+    try:
+        for p in sorted(raiz.iterdir()):
+            try:
+                if (p / "operstate").read_text().strip() in ("up", "unknown") and p.name != "lo":
+                    ativas.append(re.sub(r"\d+$", "", p.name))  # so o tipo (wlan, eth, rmnet, tun), sem numero
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return sorted(set(ativas)) or None
+
+
+def aparelho_android(props):
+    gles = versao_gles(props.get("opengles"))
+    ap = {k: props.get(k) or None for k in ("fabricante", "marca", "modelo", "codinome", "plataforma", "hardware",
+                                             "android", "sdk", "patch_seguranca", "one_ui", "api_de_fabrica", "tipo_build")}
+    ap["abis"] = (props.get("abis") or "").split(",") if props.get("abis") else None
+    gpu = {"opengles": gles, "vulkan": bool(props.get("vulkan")), "driver_vulkan": props.get("vulkan") or None,
+           "egl": props.get("egl") or None}
+    return ap, gpu
+
+
+def coleta_android_este(rapido):
+    props = props_locais()
+    ap, gpu = aparelho_android(props)
+    # O A12 tem o driver (vulkan.mt6765.so) mas nao publica ro.hardware.vulkan (conferido em 17/11): olha o driver tambem
+    drivers = [p.name for d in ("/vendor/lib64/hw", "/vendor/lib/hw") for p in (pathlib.Path(d).glob("vulkan.*.so")
+                                                                                  if pathlib.Path(d).is_dir() else [])]
+    if drivers and not gpu["vulkan"]:
+        gpu.update({"vulkan": True, "driver_vulkan": drivers[0].split(".")[1]})
+    freqs = []
+    for f in pathlib.Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/cpuinfo_max_freq"):
+        try:
+            freqs.append(f.read_text().strip())
+        except OSError:
+            pass
+    try:
+        cpu = cpuinfo(pathlib.Path("/proc/cpuinfo").read_text(), freqs)
+    except OSError:
+        cpu = {"nucleos": os.cpu_count()}
+    cpu["nucleos"] = cpu.get("nucleos") or os.cpu_count()
+    try:
+        mem = meminfo(pathlib.Path("/proc/meminfo").read_text())
+    except OSError:
+        mem = {}
+    st = os.statvfs(str(pathlib.Path.home()))
+    arm = {"interno_total_gb": round(st.f_blocks * st.f_frsize / 1e9, 1), "interno_livre_gb": round(st.f_bavail * st.f_frsize / 1e9, 1)}
+    bat = termux_api("termux-battery-status")
+    bateria = {k: bat.get(k) for k in ("percentage", "health", "temperature", "plugged", "status") if k in bat} or None
+    wifi = termux_api("termux-wifi-connectioninfo")
+    rede = {"interfaces_ativas": interfaces_ativas()}
+    rede.update({k: wifi.get(k) for k in ("frequency_mhz", "link_speed_mbps", "rssi", "supplicant_state") if k in wifi})
+    rede.update(latencia_tcp())
+    tela = {"densidade_dpi": num(props.get("densidade"))}
+    soft = {"termux": os.environ.get("TERMUX_VERSION"), "python": platform.python_version()}
+    testes = {} if rapido else {"cpu_sha256_mb_s_1nucleo": teste_cpu(), "disco": teste_disco(BASE)}
+    return {"alvo": "android", "origem": "termux", "aparelho": ap, "cpu": cpu, "memoria": mem, "armazenamento": arm,
+            "tela": tela, "gpu": gpu, "bateria": bateria, "rede": rede, "software": soft, "testes": testes}
+
+
+def dispositivos_adb():
+    """Seriais que o adb enxerga, menos o proprio celular (o `cel` liga o adb do Termux ao proprio aparelho)."""
+    saida = roda(["adb", "devices"], 15)
+    seriais = [l.split("\t")[0] for l in saida.splitlines()[1:] if l.endswith("\tdevice")]
+    return [s for s in seriais if not s.startswith(("127.0.0.1:", "localhost:", "[::1]:"))]
+
+
+def coleta_android_adb(serial, rapido):
+    props = props_adb(serial)
+    if not props.get("modelo"):
+        raise SystemExit("O aparelho nao respondeu ao adb (a depuracao foi permitida na tela dele?).")
+    ap, gpu = aparelho_android(props)
+    drv = re.search(r"vulkan\.(\w+)\.so", adb(serial, "ls /vendor/lib64/hw /vendor/lib/hw 2>/dev/null"))
+    if drv and not gpu["vulkan"]:
+        gpu.update({"vulkan": True, "driver_vulkan": drv.group(1)})
+    freqs = adb(serial, "cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq 2>/dev/null").split()
+    cpu = cpuinfo(adb(serial, "cat /proc/cpuinfo"), freqs)
+    mem = meminfo(adb(serial, "cat /proc/meminfo"))
+    arm = {}
+    linha = (adb(serial, "df -k /data 2>/dev/null").splitlines() or [""])[-1].split()
+    if len(linha) >= 4 and linha[1].isdigit():
+        arm = {"interno_total_gb": round(int(linha[1]) * 1024 / 1e9, 1), "interno_livre_gb": round(int(linha[3]) * 1024 / 1e9, 1)}
+    bat = {}
+    for l in adb(serial, "dumpsys battery").splitlines():
+        k, _, v = l.strip().partition(":")
+        if k in ("level", "health", "temperature", "status", "AC powered", "USB powered"):
+            bat[k] = v.strip()
+    if "temperature" in bat:
+        bat["temperature"] = (num(bat["temperature"], 0) or 0) / 10
+    tam = re.search(r"(\d+)x(\d+)", adb(serial, "wm size"))
+    dens = num(adb(serial, "wm density"))
+    tela = {"resolucao": f"{tam.group(1)}x{tam.group(2)}" if tam else None, "densidade_dpi": dens}
+    gles = re.search(r"GLES:\s*(.+)", adb(serial, "dumpsys SurfaceFlinger | grep -m1 GLES:"))
+    if gles:
+        gpu["renderizador"] = gles.group(1).strip()[:100]
+    soft = {"apps_total": int(num(adb(serial, "pm list packages | wc -l"), 0) or 0),
+            "apps_instalados_pelo_usuario": int(num(adb(serial, "pm list packages -3 | wc -l"), 0) or 0)}
+    testes = {}
+    if not rapido:
+        dd = adb(serial, "dd if=/dev/zero of=/data/local/tmp/univo-teste bs=1048576 count=32 conv=fsync 2>&1; rm -f /data/local/tmp/univo-teste", 90)
+        vel = re.search(r"([\d.]+)\s*([KMG])/s", dd)
+        if vel:
+            fator = {"K": 1 / 1024, "M": 1, "G": 1024}[vel.group(2)]
+            testes["disco"] = {"escrita_mb_s": round(float(vel.group(1)) * fator, 1)}
+    return {"alvo": "android", "origem": "adb", "aparelho": ap, "cpu": cpu, "memoria": mem, "armazenamento": arm,
+            "tela": tela, "gpu": gpu, "bateria": bat or None, "rede": {}, "software": soft, "testes": testes}
+
+
+# ------------------------------------------------------------------ PC: Windows (PowerShell) ou Linux
+PS_COLETA = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+function Ler($classe) { Get-CimInstance $classe -ErrorAction SilentlyContinue }
+Add-Type -Namespace Univo -Name K32 -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint f);' -ErrorAction SilentlyContinue
+$p = Ler Win32_Processor | Select-Object -First 1
+$cs = Ler Win32_ComputerSystem
+$bb = Ler Win32_BaseBoard
+$os = Ler Win32_OperatingSystem
+$c = Ler Win32_LogicalDisk | Where-Object { $_.DeviceID -eq $env:SystemDrive }
+$ram = @(Ler Win32_PhysicalMemory)
+$gpus = @(Ler Win32_VideoController | ForEach-Object { [ordered]@{ nome = $_.Name; vram_mb = [math]::Round($_.AdapterRAM / 1MB); modo = $_.VideoModeDescription } })
+$discos = @(Get-PhysicalDisk | ForEach-Object { [ordered]@{ modelo = $_.FriendlyName; tipo = "$($_.MediaType)"; barramento = "$($_.BusType)"; gb = [math]::Round($_.Size / 1e9) } })
+$redes = @(Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | ForEach-Object { [ordered]@{ placa = $_.InterfaceDescription; velocidade = "$($_.LinkSpeed)"; meio = "$($_.MediaType)" } })
+$bat = Ler Win32_Battery | Select-Object -First 1
+$sha = [System.Security.Cryptography.SHA256]::Create(); $buf = New-Object byte[] 1048576; $n = 0
+$sw = [Diagnostics.Stopwatch]::StartNew(); while ($sw.Elapsed.TotalSeconds -lt 1.5) { [void]$sha.ComputeHash($buf); $n++ }
+$cpu_mb_s = [math]::Round($n / $sw.Elapsed.TotalSeconds, 1)
+$lat = @(); foreach ($i in 1..3) { $t = New-Object Net.Sockets.TcpClient; $s = [Diagnostics.Stopwatch]::StartNew(); try { $t.Connect('1.1.1.1', 443); $lat += [math]::Round($s.Elapsed.TotalMilliseconds, 1) } catch {} ; $t.Close() }
+$f = { param($x) [Univo.K32]::IsProcessorFeaturePresent($x) }
+[ordered]@{
+  alvo = 'pc'; origem = 'windows'
+  aparelho = [ordered]@{ fabricante = $cs.Manufacturer; modelo = $cs.Model; placa_mae = "$($bb.Manufacturer) $($bb.Product)"; tipo = $cs.SystemType }
+  cpu = [ordered]@{ nome = "$($p.Name)".Trim(); nucleos = $p.NumberOfCores; threads = $p.NumberOfLogicalProcessors; mhz_max = $p.MaxClockSpeed; l2_kb = $p.L2CacheSize; l3_kb = $p.L3CacheSize; sse42 = (& $f 38); avx = (& $f 39); avx2 = (& $f 40); avx512 = (& $f 41) }
+  memoria = [ordered]@{ total_mb = [math]::Round($cs.TotalPhysicalMemory / 1MB); livre_mb = [math]::Round($os.FreePhysicalMemory / 1KB); pentes = $ram.Count; mhz = ($ram | Select-Object -First 1).ConfiguredClockSpeed }
+  armazenamento = [ordered]@{ sistema_total_gb = [math]::Round($c.Size / 1e9, 1); sistema_livre_gb = [math]::Round($c.FreeSpace / 1e9, 1); discos = $discos }
+  gpu = [ordered]@{ placas = $gpus }
+  bateria = $(if ($bat) { [ordered]@{ percentage = $bat.EstimatedChargeRemaining; status = $bat.BatteryStatus } } else { $null })
+  rede = [ordered]@{ placas_ativas = $redes; internet_ms_min = $(if ($lat) { ($lat | Measure-Object -Minimum).Minimum } else { $null }) }
+  software = [ordered]@{ sistema = $os.Caption; versao = $os.Version; build = $os.BuildNumber; arquitetura = $os.OSArchitecture; powershell = "$($PSVersionTable.PSVersion)" }
+  testes = [ordered]@{ cpu_sha256_mb_s_1nucleo = $cpu_mb_s }
+} | ConvertTo-Json -Depth 6 -Compress
+""".strip()
+
+PS_ARQUIVO = ("# Univo-telemetria-pc.ps1 - mede ESTE computador (hardware, software e rede; nada pessoal) e grava um .json\n"
+              "# ao lado deste arquivo. Depois: copie o .json para o celular e rode 'telemetria importar ARQUIVO'.\n"
+              "# Nunca le: numero de serie, MAC, nome do PC, usuario, contas, arquivos, IP ou nome de rede.\n"
+              "$json = & {\n" + PS_COLETA + "\n}\n"
+              "$nome = 'univo-perfil-pc-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json'\n"
+              "$destino = if ($PSScriptRoot) { Join-Path $PSScriptRoot $nome } else { Join-Path $env:USERPROFILE\\Downloads $nome }\n"
+              "[IO.File]::WriteAllText($destino, $json, (New-Object Text.UTF8Encoding $false))\n"
+              "Write-Host \"Perfil gravado: $destino\" -ForegroundColor Cyan\n")
+
+
+def coleta_pc(rapido):
+    if WINDOWS:
+        enc = base64.b64encode(PS_COLETA.encode("utf-16-le")).decode("ascii")
+        saida = roda(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc], 120)
+        try:
+            dados = json.loads(saida)
+        except ValueError:
+            raise SystemExit("O PowerShell nao devolveu a medicao (rode de novo; se repetir, mostre ao Claude Code).")
+        if not rapido:
+            dados.setdefault("testes", {})["disco"] = teste_disco(BASE)
+        return dados
+    try:  # Linux
+        txt = pathlib.Path("/proc/cpuinfo").read_text()
+        flags = set((re.search(r"(?m)^flags\s*:\s*(.+)$", txt) or [None, ""])[1].split())
+        cpu = cpuinfo(txt, [])
+        cpu.update({"avx": "avx" in flags, "avx2": "avx2" in flags, "sse42": "sse4_2" in flags})
+        mem = meminfo(pathlib.Path("/proc/meminfo").read_text())
+    except OSError:
+        cpu, mem = {"nucleos": os.cpu_count()}, {}
+    soft = {"sistema": platform.platform(terse=True), "python": platform.python_version()}
+    try:
+        soft["distro"] = re.search(r'(?m)^PRETTY_NAME="?([^"\n]+)', pathlib.Path("/etc/os-release").read_text()).group(1)
+    except (OSError, AttributeError):
+        pass
+    st = os.statvfs("/")
+    testes = {} if rapido else {"cpu_sha256_mb_s_1nucleo": teste_cpu(), "disco": teste_disco(BASE)}
+    return {"alvo": "pc", "origem": "linux", "aparelho": {"tipo": platform.machine()}, "cpu": cpu, "memoria": mem,
+            "armazenamento": {"sistema_total_gb": round(st.f_blocks * st.f_frsize / 1e9, 1),
+                              "sistema_livre_gb": round(st.f_bavail * st.f_frsize / 1e9, 1)},
+            "rede": {"interfaces_ativas": interfaces_ativas(), **latencia_tcp()}, "software": soft, "testes": testes}
+
+
+# ------------------------------------------------------------------ perfil: arena, conferencia, gravar, enviar
+def regua_arena(p):
+    """So os numeros que o ARENA usa para escolher emulador e ajuste (a IA compara com a base; nada de palpite aqui)."""
+    cpu, mem, gpu, t = p.get("cpu") or {}, p.get("memoria") or {}, p.get("gpu") or {}, p.get("testes") or {}
+    r = {"nucleos": cpu.get("nucleos") or cpu.get("threads"), "ram_gb": round((mem.get("total_mb") or 0) / 1024, 1) or None,
+         "cpu_mb_s": t.get("cpu_sha256_mb_s_1nucleo")}
+    if p.get("alvo") == "android":
+        abis = (p.get("aparelho") or {}).get("abis") or []
+        r.update({"arm64": "arm64-v8a" in abis, "opengles": gpu.get("opengles"), "vulkan": gpu.get("vulkan")})
+    else:
+        r.update({"avx": cpu.get("avx"), "avx2": cpu.get("avx2"),
+                  "gpu": ", ".join(g.get("nome", "") for g in (gpu.get("placas") or []) if isinstance(g, dict)
+                                   and not re.search(r"(?i)virtual|basic display|remote|parsec|idd", g.get("nome") or "")) or None})
+    return r
+
+
+def limpa_rotulo(rotulo):
+    rotulo = (rotulo or "").strip()[:60]
+    if rotulo and (privado(rotulo) or re.search(r"\d{6,}", rotulo)):
+        raise SystemExit("Rotulo recusado: parece ter dado pessoal (numero longo, e-mail, IP...). Use algo como 'PC da sala 3'.")
+    return rotulo or None
+
+
+def monta(dados, rotulo):
+    p = {"univo_telemetria": VERSAO, "id": uuid.uuid4().hex[:12], "quando": time.strftime("%Y-%m-%dT%H:%M:%S"),
+         "rotulo": limpa_rotulo(rotulo)}
+    p.update({k: v for k, v in dados.items() if k in SECOES})
+    p["arena"] = regua_arena(p)
+    return p
+
+
+def confere(p):
+    """Recusa o perfil inteiro se aparecer QUALQUER dado proibido ou secao desconhecida."""
+    if not isinstance(p, dict) or p.get("univo_telemetria") != VERSAO:
+        raise ValueError("nao e um perfil da telemetria do Univo")
+    estranhas = set(p) - SECOES
+    if estranhas:
+        raise ValueError(f"secao fora da lista: {sorted(estranhas)[0]}")
+    texto = json.dumps(p, ensure_ascii=False)
+    if len(texto.encode("utf-8")) > MAX_PERFIL:
+        raise ValueError("perfil grande demais")
+    achado = privado(texto)
+    if achado:
+        raise ValueError(f"o perfil tem {achado}: nao foi gravado")
+    if not re.fullmatch(r"[0-9a-f]{12}", str(p.get("id", ""))):
+        raise ValueError("id invalido")
+    return texto
+
+
+def grava(p):
+    texto = confere(p)
+    destino = (FILA if TERMUX else BASE) / f"{p['id']}.json"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(texto, encoding="utf-8")
+    return destino
+
+
+def token():
+    try:
+        for linha in (pathlib.Path.home() / ".qwen" / ".env").read_text().splitlines():
+            if linha.startswith("PONTE_PC_TOKEN="):
+                return linha.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def enviar(quieto=False):
+    if not TERMUX:
+        return 0  # no PC o perfil ja nasce na base
+    arquivos = sorted(FILA.glob("*.json")) if FILA.exists() else []
+    if not arquivos:
+        quieto or print("Nada na fila.")
+        return 0
+    tk = token()
+    if not tk:
+        quieto or print("Sem PONTE_PC_TOKEN em ~/.qwen/.env: o celular nao esta pareado com a ponte do PC. A fila espera.")
+        return 3
+    ok = 0
+    for arq in arquivos:
+        req = urllib.request.Request(f"{PONTE}/v1/telemetria/perfil?nome={arq.stem}", data=arq.read_bytes(), method="PUT",
+                                     headers={"Authorization": f"Bearer {tk}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                r.read()
+        except Exception as e:  # PC desligado, Tailscale fora, ponte antiga: fica na fila
+            quieto or print(f"O PC nao recebeu ({type(e).__name__}); {len(arquivos) - ok} perfil(is) seguem na fila.")
+            return 3
+        ENVIADOS.mkdir(parents=True, exist_ok=True)
+        arq.replace(ENVIADOS / arq.name)
+        ok += 1
+    quieto or print(f"Enviado(s) ao PC: {ok}.")
+    return 0
+
+
+def todos():
+    pastas = [FILA, ENVIADOS] if TERMUX else [BASE]
+    perfis = []
+    for pasta in pastas:
+        for arq in sorted(pasta.glob("*.json")) if pasta.exists() else []:
+            try:
+                perfis.append(json.loads(arq.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+    return sorted(perfis, key=lambda p: p.get("quando", ""))
+
+
+def linha_resumo(p):
+    a, r = p.get("aparelho") or {}, p.get("arena") or {}
+    nome = " ".join(x for x in (a.get("fabricante"), a.get("modelo")) if x) or (p.get("cpu") or {}).get("nome") or "?"
+    extra = (f"arm64={r.get('arm64')} GLES={r.get('opengles')} vulkan={r.get('vulkan')}" if p.get("alvo") == "android"
+             else f"AVX={r.get('avx')} AVX2={r.get('avx2')} GPU={r.get('gpu')}")
+    return (f"| {p.get('quando', '')[:16]} | {p.get('id')} | {p.get('alvo')} | {nome[:40]} | {p.get('rotulo') or ''} | "
+            f"{r.get('nucleos')} | {r.get('ram_gb')} | {r.get('cpu_mb_s')} | {extra} |")
+
+
+def resumo():
+    perfis = todos()
+    linhas = ["# Perfis de aparelhos (telemetria do Univo Core)", "",
+              "Gerado pelo comando `telemetria resumo`. So hardware, software e rede; nada pessoal. A IA compara um aparelho",
+              "novo com estes para prever problema e ajuste (ARENA, Ordoc, rede). Detalhe de cada um: `telemetria ver ID`.", "",
+              "| quando | id | alvo | aparelho | rotulo | nucleos | RAM GB | CPU MB/s | ARENA |", "|---|---|---|---|---|---|---|---|---|"]
+    linhas += [linha_resumo(p) for p in perfis] or ["| (nenhum perfil ainda) |||||||||"]
+    texto = "\n".join(linhas) + "\n"
+    if not TERMUX:
+        BASE.mkdir(parents=True, exist_ok=True)
+        (BASE / "PERFIS.md").write_text(texto, encoding="utf-8")
+    return texto
+
+
+REGRAS = """Entra (lista fechada): fabricante, marca, modelo e codinome; processador (nome, nucleos, MHz, AVX/AVX2 no PC);
+RAM total e livre; armazenamento total e livre; tela (resolucao e densidade); GPU (OpenGL ES, Vulkan, nome da placa);
+bateria (nivel, saude, temperatura); rede (tipo de interface ativa, frequencia e velocidade do Wi-Fi, sinal, latencia
+para 1.1.1.1); software (versao do Android/Windows, patch, quantidade de apps - so o numero); testes de velocidade
+(CPU e disco) e a regua do ARENA.
+Nunca entra: numero de serie, IMEI, MAC, SSID/BSSID, IP, nome do PC ou usuario, conta, telefone, contato, nome de app,
+arquivo, foto, localizacao ou nome de pessoa. O perfil e conferido antes de gravar e de novo no PC; se aparecer algo
+proibido, ele e recusado inteiro. Aparelho de aluno: so com a permissao dele na tela, e o rotulo nunca leva o nome.
+Destino: este aparelho e o PC do Rafael (pela Tailscale, ponte do PC). Nao vai para nenhum servico externo."""
+
+
+def explica_pc():
+    print("Para medir um computador:")
+    print(" - PC do Rafael: no PC rode  python \"C:\\Android Embeeded\\scripts\\celular-kit\\bin\\telemetria\" coletar este")
+    print(" - Qualquer PC com Windows: rode  telemetria script-pc  aqui, ligue o celular no PC pelo cabo (Transferir arquivos),")
+    print("   copie Download/Univo-telemetria-pc.ps1 para o PC, clique com o botao direito > Executar com o PowerShell")
+    print("   (e permita). Ele grava univo-perfil-pc-*.json ao lado; traga esse arquivo para Download e rode:")
+    print("   telemetria importar ~/storage/downloads/univo-perfil-pc-*.json")
+
+
+def principal(argv):
+    args = list(argv)
+    rotulo, rapido, quieto = None, "--rapido" in args, "--quieto" in args
+    args = [a for a in args if a not in ("--rapido", "--quieto")]
+    if "--rotulo" in args:
+        i = args.index("--rotulo")
+        rotulo = args[i + 1] if i + 1 < len(args) else ""
+        del args[i:i + 2]
+    cmd = args[0] if args else "coletar"
+    if cmd in ("-h", "--help", "ajuda"):
+        print(__doc__.strip())
+        return 0
+    if cmd == "regras":
+        print(REGRAS)
+        return 0
+    if cmd == "enviar":
+        return enviar(quieto)
+    if cmd == "resumo":
+        print(resumo(), end="")
+        return 0
+    if cmd == "listar":
+        for p in todos():
+            print(linha_resumo(p))
+        return 0
+    if cmd == "ver" and len(args) > 1:
+        for p in todos():
+            if p.get("id") == args[1]:
+                print(json.dumps(p, ensure_ascii=False, indent=2))
+                return 0
+        print("Nao achei esse id (veja: telemetria listar).")
+        return 1
+    if cmd == "script-pc":
+        destino = pathlib.Path.home() / "storage" / "downloads" if TERMUX else BASE
+        destino = destino if destino.is_dir() else BASE
+        destino.mkdir(parents=True, exist_ok=True)
+        arq = destino / "Univo-telemetria-pc.ps1"
+        arq.write_text(PS_ARQUIVO.replace("\n", "\r\n"), encoding="utf-8-sig")
+        print(f"Gravado: {arq}")
+        explica_pc()
+        return 0
+    if cmd == "importar" and len(args) > 1:
+        try:
+            dados = json.loads(pathlib.Path(args[1]).read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as e:
+            print(f"Nao consegui ler o arquivo ({type(e).__name__}).")
+            return 1
+        dados["origem"] = "ps1"
+        p = monta(dados, rotulo)
+    elif cmd == "parear":
+        if len(args) < 3 or not re.fullmatch(r"[\w.\-]+:\d{2,5}", args[1]) or not re.fullmatch(r"\d{6}", args[2]):
+            print("Uso: telemetria parear IP:PORTA CODIGO  (no outro celular: Opcoes do desenvolvedor > Depuracao sem fio > Parear com codigo)")
+            return 1
+        print(roda(["adb", "pair", args[1], args[2]], 30).strip() or "O pareamento falhou (mesma rede? codigo ainda na tela?).")
+        print("Agora: telemetria coletar android  (se pedir, conecte com a porta mostrada em 'Depuracao sem fio': adb connect IP:PORTA)")
+        return 0
+    elif cmd == "coletar" or cmd in ("este", "android", "pc"):
+        alvo = cmd if cmd != "coletar" else (args[1] if len(args) > 1 else "este")
+        if alvo == "pc" and TERMUX:
+            explica_pc()
+            return 0
+        if alvo == "android":
+            if not shutil.which("adb"):
+                print("Falta o adb (no Termux: pkg install android-tools; no PC: o adb do WinGet).")
+                return 1
+            aparelhos = dispositivos_adb()
+            if not aparelhos:
+                print("Nenhum outro Android no adb. No PC: cabo USB e 'Permitir depuracao USB' na tela do celular.")
+                print("No Termux: telemetria parear IP:PORTA CODIGO (depuracao sem fio do outro celular).")
+                return 1
+            if len(aparelhos) > 1:
+                print("Ha mais de um aparelho no adb; deixe so o que vai ser medido.")
+                return 1
+            dados = coleta_android_adb(aparelhos[0], rapido)
+        elif TERMUX:
+            dados = coleta_android_este(rapido)
+        else:
+            dados = coleta_pc(rapido)
+        p = monta(dados, rotulo)
+    else:
+        print(__doc__.strip())
+        return 1
+    try:
+        arq = grava(p)
+    except ValueError as e:
+        print(f"Recusado: {e}.")
+        return 2
+    r = p["arena"]
+    print(f"Perfil {p['id']} gravado ({arq.parent.name}). {linha_resumo(p)}")
+    print(f"Regua do ARENA: {json.dumps(r, ensure_ascii=False)}")
+    if TERMUX:
+        enviar(quieto)
+    else:
+        resumo()
+        print(f"Base: {BASE} (PERFIS.md atualizado)")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(principal(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)

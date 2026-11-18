@@ -60,7 +60,22 @@ MAX_PAREAMENTOS_PENDENTES = 5
 URL_PUBLICA_PADRAO = "http://100.64.0.1:20130"     # o PC na Tailscale (IP fixo do aparelho); --url-publica troca
 URL_PUBLICA_OK = re.compile(r"http://[A-Za-z0-9.\-]{1,100}:\d{2,5}")
 TOKEN_OK = re.compile(r"[A-Za-z0-9_\-]{32,128}")
-ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "pedidos": "bin/pedidos", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
+ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/saida", "guarda": "bin/guarda", "cel": "bin/cel", "memoria": "bin/memoria", "link": "bin/link", "controle_tv": "bin/controle-tv", "pedidos": "bin/pedidos", "telemetria": "bin/telemetria", "boot": "boot/iniciar-a12", "qwen_md": "QWEN.md"}  # o que o instalador leva ao celular
+# Telemetria de aparelhos (17/11/2026): perfis de hardware/software/rede, SEM dado pessoal, que o celular manda pela Tailscale.
+# A base fica na univo-sync (memoria/telemetria/ esta fora do git); `telemetria resumo` no PC refaz o PERFIS.md.
+TELEMETRIA_DIR = os.environ.get("UNIVO_TELEMETRIA_DIR", r"C:\Projetos\univo-sync\memoria\telemetria\perfis")
+MAX_PERFIL = 48 * 1024
+MAX_PERFIS_POR_HORA = 60
+SECOES_PERFIL = {"univo_telemetria", "id", "quando", "alvo", "origem", "rotulo", "aparelho", "cpu", "memoria", "armazenamento",
+                 "tela", "gpu", "bateria", "rede", "software", "testes", "arena", "avisos"}
+PRIVADO_PERFIL = [  # conferencia independente da do celular (a mesma lista do bin/telemetria)
+    re.compile(r"\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"),
+    re.compile(r"(?<![\d.])\d{15}(?![\d.])"),
+    re.compile(r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"),
+    re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"),
+    re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b"),
+    re.compile(r"(?i)\b(ssid|bssid|serial|serialno|imei|meid|iccid|imsi|android_id|mac_address|telefone|phone)\b"),
+]
 MAX_ACOES_POR_MINUTO = 6
 MAX_ACAO_S = 300
 MAX_SAIDA_ACAO = 6000
@@ -319,7 +334,7 @@ def tira(chave, itens):  # regras que o proprio kit pos antes e mudou (nunca as 
 # O ia abre o Qwen em modo yolo (pedido do Rafael, 04/11: "total autorizacao ... sem ficar interrompendo"): nada pergunta,
 # mas o que esta em deny segue BLOQUEADO (o Qwen Code 0.26.5 confere deny antes do modo). Deny = so o que nao tem volta.
 tira("deny", ["Bash(pkg *)", "Bash(apt *)"])
-junta("allow", ["Bash(cel *)", "Bash(guarda *)", "Bash(caixa *)", "Bash(memoria *)", "Bash(saida *)", "Bash(ia status)",
+junta("allow", ["Bash(cel *)", "Bash(guarda *)", "Bash(caixa *)", "Bash(memoria *)", "Bash(saida *)", "Bash(ia status)", "Bash(telemetria *)",
                 "Bash(linux status)", "Bash(linux -c *)", "Bash(rg *)", "Bash(find *)", "Bash(df *)", "Bash(free *)",
                 "Bash(timeout 20 termux-*)", "Bash(python3 ~/kit/scripts-qwen/*)", "Bash(bash ~/kit/scripts-qwen/*)"])
 junta("ask", ["Bash(cel sh *)", "Bash(cel wifi desligar*)", "Bash(cel dados desligar*)", "Bash(cel aviao ligar*)",
@@ -336,24 +351,29 @@ dados["permissions"] = regras
 ferr = dados.get("tools") if isinstance(dados.get("tools"), dict) else {}
 ferr["approvalMode"] = "yolo"  # sem perguntar (pedido do Rafael, 04/11); o deny acima segue bloqueando
 dados["tools"] = ferr
-# UNIVO (pedido do Rafael, 04/11): o Qwen do celular se chama Univo; verde puro sobre preto, profissional.
+# UNIVO (pedido do Rafael, 04/11): o Qwen do celular se chama Univo; azul do Windows (#0078D4) sobre preto, profissional.
 ui = dados.get("ui") if isinstance(dados.get("ui"), dict) else {}
 temas = ui.get("customThemes") if isinstance(ui.get("customThemes"), dict) else {}
-temas["Univo"] = {  # so verde puro, cinza e branco (pedido do Rafael, 05/11: "o verde escuro quase nao da para ver")
-    "type": "custom", "name": "Univo", "Background": "#000000", "Foreground": "#00FF41", "LightBlue": "#00FF41",
-    "AccentBlue": "#00FF41", "AccentPurple": "#FFFFFF", "AccentCyan": "#FFFFFF", "AccentGreen": "#00FF41", "AccentYellow": "#FFFFFF",
+temas["Univo"] = {  # so verde puro, cinza e branco (pedido do Rafael, 05/11: "o verde escuro quase nao da para ver"; 12/11: azul do Windows no lugar do verde)
+    "type": "custom", "name": "Univo", "Background": "#000000", "Foreground": "#0078D4", "LightBlue": "#0078D4",
+    "AccentBlue": "#0078D4", "AccentPurple": "#FFFFFF", "AccentCyan": "#FFFFFF", "AccentGreen": "#0078D4", "AccentYellow": "#FFFFFF",
     "AccentRed": "#FFFFFF", "AccentYellowDim": "#B0B0B0", "AccentRedDim": "#B0B0B0", "DiffAdded": "#3A3A3A", "DiffRemoved": "#3A3A3A",
-    "Comment": "#B0B0B0", "Gray": "#909090", "GradientColors": ["#00FF41", "#FFFFFF"],
+    "Comment": "#B0B0B0", "Gray": "#909090", "GradientColors": ["#0078D4", "#FFFFFF"],
 }
 ui["customThemes"] = temas
 ui["theme"] = "Univo"
-ui["customBannerTitle"] = "UNIVO"
-ui["customBannerSubtitle"] = "agente do Galaxy A12 | humor 80% | sinceridade 100% | memória local"
+ui["customBannerTitle"] = "UNIVO CORE"
+ui["customBannerSubtitle"] = "agente do Galaxy A12 | telemetria | humor 80% | sinceridade 100% | memória local"
+# 17/11/2026 (pedido do Rafael): UNIVO CORE no lugar do antigo MATRIX, letras grossas só com blocos cheios
+# (sem o contorno de dentro ╔═╗║). large = 43 colunas (tela deitada ou fonte menor); small = 18 colunas (em pé).
 ui["customAsciiArt"] = {
-    "small": "█▀▄▀█ ▄▀█ ▀█▀ █▀█ █ ▀▄▀\n█ ▀ █ █▀█  █  █▀▄ █ █ █",
-    "large": ("███╗   ███╗ █████╗ ████████╗██████╗ ██╗██╗  ██╗\n████╗ ████║██╔══██╗╚══██╔══╝██╔══██╗██║╚██╗██╔╝\n"
-              "██╔████╔██║███████║   ██║   ██████╔╝██║ ╚███╔╝ \n██║╚██╔╝██║██╔══██║   ██║   ██╔══██╗██║ ██╔██╗ \n"
-              "██║ ╚═╝ ██║██║  ██║   ██║   ██║  ██║██║██╔╝ ██╗\n╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝"),
+    "small": "█ █ █▄ █ █ █ █ █▀█\n█▄█ █ ▀█ █ ▀▄▀ █▄█\n  █▀▀ █▀█ █▀█ █▀▀\n  █▄▄ █▄█ █▀▄ ██▄",
+    "large": ("██    ██  ███    ██  ██  ██    ██   ██████\n██    ██  ████   ██  ██  ██    ██  ██    ██\n"
+              "██    ██  ██ ██  ██  ██  ██    ██  ██    ██\n██    ██  ██  ██ ██  ██   ██  ██   ██    ██\n"
+              " ██████   ██   ████  ██    ████     ██████\n\n"
+              "     ██████   ██████   ██████   ███████\n    ██       ██    ██  ██   ██  ██\n"
+              "    ██       ██    ██  ██████   █████\n    ██       ██    ██  ██   ██  ██\n"
+              "     ██████   ██████   ██   ██  ███████"),
 }
 ui["customWittyPhrases"] = [  # personalidade do Univo (robo de missao + mordomo + medico cetico); frases originais
     "Humor em 80%. Paciência em análise...", "Lendo seus logs. Você não vai gostar...", "Diagnóstico provável: erro humano. Confirmando...",
@@ -422,24 +442,27 @@ ponte_instalar() {
   cat > "$B/.pedidos.novo" <<'@@FIM_PED@@' || cat_falhou=1
 @@PED@@
 @@FIM_PED@@
+  cat > "$B/.telemetria.novo" <<'@@FIM_TEL@@' || cat_falhou=1
+@@TEL@@
+@@FIM_TEL@@
   cat > "$T/.iniciar-a12.novo" <<'@@FIM_BOOT@@' || cat_falhou=1
 @@BOOT@@
 @@FIM_BOOT@@
   cat > "$Q/.QWEN.md.novo" <<'@@FIM_QWEN@@' || cat_falhou=1
 @@QWEN_MD@@
 @@FIM_QWEN@@
-  if [ "$cat_falhou" != 0 ] || [ ! -s "$B/.ia.novo" ] || [ ! -s "$B/.caixa.novo" ] || [ ! -s "$B/.saida.novo" ] || [ ! -s "$B/.guarda.novo" ] || [ ! -s "$B/.cel.novo" ] || [ ! -s "$B/.memoria.novo" ] || [ ! -s "$B/.link.novo" ] || [ ! -s "$B/.controle-tv.novo" ] || [ ! -s "$B/.pedidos.novo" ] || [ ! -s "$T/.iniciar-a12.novo" ] || [ ! -s "$Q/.QWEN.md.novo" ]; then
+  if [ "$cat_falhou" != 0 ] || [ ! -s "$B/.ia.novo" ] || [ ! -s "$B/.caixa.novo" ] || [ ! -s "$B/.saida.novo" ] || [ ! -s "$B/.guarda.novo" ] || [ ! -s "$B/.cel.novo" ] || [ ! -s "$B/.memoria.novo" ] || [ ! -s "$B/.link.novo" ] || [ ! -s "$B/.controle-tv.novo" ] || [ ! -s "$B/.pedidos.novo" ] || [ ! -s "$B/.telemetria.novo" ] || [ ! -s "$T/.iniciar-a12.novo" ] || [ ! -s "$Q/.QWEN.md.novo" ]; then
     echo "Nao consegui gravar os arquivos novos (armazenamento cheio?). Nada foi trocado; libere espaco e rode de novo."
-    rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
+    rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$B/.telemetria.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
   fi
   for f in "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.link.novo" "$T/.iniciar-a12.novo"; do
-    "$BASH" -n "$f" 2>/dev/null || { echo "O arquivo '$f' chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1; }
+    "$BASH" -n "$f" 2>/dev/null || { echo "O arquivo '$f' chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$B/.telemetria.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1; }
   done
-  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read()); ast.parse(open(sys.argv[2], encoding="utf-8").read()); ast.parse(open(sys.argv[3], encoding="utf-8").read())' "$B/.memoria.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" 2>/dev/null; then
-    echo "O arquivo memoria ou controle-tv chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
+  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read()); ast.parse(open(sys.argv[2], encoding="utf-8").read()); ast.parse(open(sys.argv[3], encoding="utf-8").read()); ast.parse(open(sys.argv[4], encoding="utf-8").read())' "$B/.memoria.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$B/.telemetria.novo" 2>/dev/null; then
+    echo "O arquivo memoria, controle-tv, pedidos ou telemetria chegou com erro de sintaxe (download cortado?). Nada foi trocado; rode de novo."; rm -f "$B/.ia.novo" "$B/.caixa.novo" "$B/.saida.novo" "$B/.guarda.novo" "$B/.cel.novo" "$B/.memoria.novo" "$B/.link.novo" "$B/.controle-tv.novo" "$B/.pedidos.novo" "$B/.telemetria.novo" "$T/.iniciar-a12.novo" "$Q/.QWEN.md.novo"; return 1
   fi
 @@BLOCO_TOKEN@@
-  for f in ia caixa saida guarda cel memoria link controle-tv pedidos; do
+  for f in ia caixa saida guarda cel memoria link controle-tv pedidos telemetria; do
     [ -e "$A/$f" ] || { [ -e "$B/$f" ] && cp -p "$B/$f" "$A/$f"; }
     chmod 755 "$B/.$f.novo" && mv -f "$B/.$f.novo" "$B/$f" && echo "  [ok]  comando $f instalado em ~/bin" || { echo "  [--]  nao consegui instalar o comando $f"; rm -f "$B/.$f.novo"; erro=1; }
   done
@@ -449,22 +472,22 @@ ponte_instalar() {
   [ -e "$A/QWEN.md" ] || { [ -e "$Q/QWEN.md" ] && cp -p "$Q/QWEN.md" "$A/QWEN.md"; }
   mv -f "$Q/.QWEN.md.novo" "$Q/QWEN.md" && echo "  [ok]  ~/.qwen/QWEN.md atualizado (instrucoes do Qwen)" || { echo "  [--]  nao consegui atualizar o QWEN.md"; rm -f "$Q/.QWEN.md.novo"; erro=1; }
   mkdir -p "$HOME/kit/scripts-qwen"
-  printf '%s\n' '#!/data/data/com.termux/files/usr/bin/bash' '# univo: a IA do celular (Qwen Code com tema Univo, pontes, modelo e memoria local), em qualquer pasta' \
-    'UNIVO=1 exec bash "${0%/*}/ia" "$@"' > "$B/univo" && chmod 755 "$B/univo" && echo "  [ok]  comando univo (a IA completa) em ~/bin" || { echo "  [--]  nao consegui criar o comando Univo"; erro=1; }
+  # 12/11: a IA e' so o comando `ia` (Univo sempre ligado dentro dele): os comandos antigos saem
+  rm -f "$B/univo" "$B/qwen-pc" "$B/qwen-local" "$B/qwen-nuvem" && echo "  [ok]  a IA e' o comando ia (Univo, qwen-pc, qwen-local e qwen-nuvem removidos)"
   C="$HOME/.termux/colors.properties"
-  if grep -q "^# Univo-kit v2" "$C" 2>/dev/null; then echo "  [ok]  cores Univo do Termux ja aplicadas"
+  if grep -q "^# Univo-kit v3" "$C" 2>/dev/null; then echo "  [ok]  cores Univo do Termux ja aplicadas"
   else mkdir -p "$HOME/.termux" "$A"; [ -e "$C" ] && [ ! -e "$A/colors.properties" ] && ! grep -q "^# Univo-kit" "$C" && cp -p "$C" "$A/colors.properties"
-    printf '%s\n' '# Univo-kit v2: so verde puro, cinza e branco sobre preto (copia das cores antigas em ~/.qwen/antes-da-ponte/colors.properties)' \
-      'background=#000000' 'foreground=#00FF41' 'cursor=#00FF41' 'color0=#000000' 'color1=#FFFFFF' 'color2=#00FF41' 'color3=#FFFFFF' \
-      'color4=#00FF41' 'color5=#FFFFFF' 'color6=#00FF41' 'color7=#C0C0C0' 'color8=#808080' 'color9=#FFFFFF' 'color10=#00FF41' \
-      'color11=#FFFFFF' 'color12=#00FF41' 'color13=#FFFFFF' 'color14=#00FF41' 'color15=#FFFFFF' > "$C" \
-      && { command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; echo "  [ok]  Termux em verde e preto (Univo)"; } \
+    printf '%s\n' '# Univo-kit v3: azul do Windows (#0078D4), cinza e branco sobre preto (copia das cores antigas em ~/.qwen/antes-da-ponte/colors.properties)' \
+      'background=#000000' 'foreground=#0078D4' 'cursor=#0078D4' 'color0=#000000' 'color1=#FFFFFF' 'color2=#0078D4' 'color3=#FFFFFF' \
+      'color4=#0078D4' 'color5=#FFFFFF' 'color6=#0078D4' 'color7=#C0C0C0' 'color8=#808080' 'color9=#FFFFFF' 'color10=#0078D4' \
+      'color11=#FFFFFF' 'color12=#0078D4' 'color13=#FFFFFF' 'color14=#0078D4' 'color15=#FFFFFF' > "$C" \
+      && { command -v termux-reload-settings >/dev/null 2>&1 && termux-reload-settings >/dev/null 2>&1; echo "  [ok]  Termux em azul e preto (Univo)"; } \
       || { echo "  [--]  nao consegui aplicar as cores do Termux"; erro=1; }
   fi
-  if grep -q "^alias qwen='Univo'" "$HOME/.bashrc" 2>/dev/null; then echo "  [ok]  qwen e Univo abrem a IA completa"
-  else { [ ! -f "$HOME/.bashrc" ] || { grep -v "^alias qwen=" "$HOME/.bashrc" > "$HOME/.bashrc.novo"; mv -f "$HOME/.bashrc.novo" "$HOME/.bashrc"; }; } \
-    && printf '%s\n' "alias qwen='Univo'  # kit da ponte: qwen e Univo abrem a IA completa em qualquer pasta" >> "$HOME/.bashrc" \
-    && echo "  [ok]  qwen agora abre o univo (vale no proximo Termux aberto)" || { echo "  [--]  nao consegui criar o atalho qwen"; erro=1; }; fi
+  if [ -f "$HOME/.bashrc" ] && grep -Eq "^alias (qwen|qp|ql)=" "$HOME/.bashrc"; then
+    grep -Ev "^alias (qwen|qp|ql)=" "$HOME/.bashrc" > "$HOME/.bashrc.novo" && mv -f "$HOME/.bashrc.novo" "$HOME/.bashrc" \
+      && echo "  [ok]  atalhos antigos (qwen, qp, ql) tirados do .bashrc: a IA e' o comando ia" || { echo "  [--]  nao consegui limpar o .bashrc"; erro=1; }
+  else echo "  [ok]  .bashrc sem atalhos antigos: a IA e' o comando ia"; fi
   [ -e "$A/settings.json" ] || { [ -e "$Q/settings.json" ] && cp -p "$Q/settings.json" "$A/settings.json"; }
   "$PY" - "@@URL@@" <<'@@FIM_PY@@'
 @@MESCLA_PY@@
@@ -523,6 +546,8 @@ class Ponte:
         self._executa = subprocess.run  # os testes trocam por um falso
         self.pasta_projetos = Path(os.environ.get("PONTE_PROJETOS", r"C:\Projetos"))  # so os LEIA-ME de cada projeto vao a memoria do Qwen
         self._projetos = None  # o projetos.py do univo-windows, carregado na primeira consulta (os testes trocam por um falso)
+        self.perfis = Path(TELEMETRIA_DIR)  # os testes trocam por uma pasta temporaria
+        self._perfis_recentes = []
         for sub in ("entrada", "saida", "retorno"):
             (self.base / sub).mkdir(parents=True, exist_ok=True)
 
@@ -858,7 +883,7 @@ class Ponte:
         textos = self._arquivos_kit_celular()
         versao = self.kit_versao()
         delimitadores = {}
-        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("pedidos", "PED"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
+        for chave, nome in (("ia", "IA"), ("caixa", "CAIXA"), ("saida", "SAIDA"), ("guarda", "GUARDA"), ("cel", "CEL"), ("memoria", "MEM"), ("link", "LINK"), ("controle_tv", "CTV"), ("pedidos", "PED"), ("telemetria", "TEL"), ("boot", "BOOT"), ("qwen_md", "QWEN"), ("mescla", "PY")):
             texto = _MESCLA_PY.rstrip("\n") if chave == "mescla" else textos[chave]
             delim = f"PONTE_FIM_{nome}_{hashlib.sha256(texto.encode('utf-8')).hexdigest()[:8].upper()}"
             if delim in texto.split("\n"):
@@ -867,7 +892,7 @@ class Ponte:
         bloco_env = _BLOCO_TOKEN_NOVO.replace("@@TOKEN@@", token) if token is not None else _BLOCO_TOKEN_JA_TEM  # (nome sem "token = " colado: o varredor de segredos do sync pega)
         valores = {
             "VERSAO": versao, "URL": url, "BLOCO_TOKEN": bloco_env,
-            "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "LINK": textos["link"], "FIM_LINK": delimitadores["LINK"], "CTV": textos["controle_tv"], "FIM_CTV": delimitadores["CTV"], "PED": textos["pedidos"], "FIM_PED": delimitadores["PED"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
+            "IA": textos["ia"], "CAIXA": textos["caixa"], "SAIDA": textos["saida"], "GUARDA": textos["guarda"], "FIM_GUARDA": delimitadores["GUARDA"], "CEL": textos["cel"], "FIM_CEL": delimitadores["CEL"], "MEM": textos["memoria"], "FIM_MEM": delimitadores["MEM"], "LINK": textos["link"], "FIM_LINK": delimitadores["LINK"], "CTV": textos["controle_tv"], "FIM_CTV": delimitadores["CTV"], "PED": textos["pedidos"], "FIM_PED": delimitadores["PED"], "TEL": textos["telemetria"], "FIM_TEL": delimitadores["TEL"], "BOOT": textos["boot"], "QWEN_MD": textos["qwen_md"], "MESCLA_PY": _MESCLA_PY.rstrip("\n"),
             "FIM_IA": delimitadores["IA"], "FIM_CAIXA": delimitadores["CAIXA"], "FIM_SAIDA": delimitadores["SAIDA"], "FIM_BOOT": delimitadores["BOOT"], "FIM_QWEN": delimitadores["QWEN"], "FIM_PY": delimitadores["PY"],
         }
         return re.sub(r"@@([A-Z_]+)@@", lambda m: valores[m.group(1)], _MODELO_INSTALADOR)
@@ -904,6 +929,38 @@ class Ponte:
                 raise ErroPonte(409, "ja existe uma entrega com esse nome neste segundo; tente de novo")
             self._entregas_recentes.append(agora)
         return {"gravado": arquivo.name, "aviso": "entrega gravada como NAO REVISADA; o Claude Code do PC revisa antes de usar."}
+
+    def telemetria_receber(self, nome, dados):
+        """Perfil de aparelho vindo do `telemetria` do celular: JSON pequeno, secoes da lista, nada pessoal; nunca sobrescreve."""
+        if not isinstance(nome, str) or not re.fullmatch(r"[0-9a-f]{12}", nome):
+            raise ErroPonte(400, "nome invalido: o id do perfil tem 12 caracteres hexadecimais")
+        if len(dados) > MAX_PERFIL:
+            raise ErroPonte(413, "perfil grande demais")
+        try:
+            texto = dados.decode("utf-8")
+            perfil = json.loads(texto)
+        except (UnicodeDecodeError, ValueError):
+            raise ErroPonte(400, "o perfil precisa ser JSON em UTF-8")
+        if not isinstance(perfil, dict) or perfil.get("univo_telemetria") != 1 or perfil.get("id") != nome:
+            raise ErroPonte(400, "nao e um perfil da telemetria do Univo (ou o id nao confere)")
+        if set(perfil) - SECOES_PERFIL:
+            raise ErroPonte(422, "perfil com secao fora da lista")
+        if any(r.search(texto) for r in PRIVADO_PERFIL) or tem_segredo(texto):
+            raise ErroPonte(422, "perfil recusado: parece ter dado pessoal ou segredo")
+        agora = self.relogio()
+        with self._trava:
+            self._perfis_recentes = [t for t in self._perfis_recentes if agora - t < 3600]
+            if len(self._perfis_recentes) >= MAX_PERFIS_POR_HORA:
+                raise ErroPonte(429, "muitos perfis na ultima hora; espere")
+            self.perfis.mkdir(parents=True, exist_ok=True)
+            arquivo = self.perfis / f"{nome}.json"
+            try:
+                with open(arquivo, "x", encoding="utf-8", newline="\n") as f:
+                    f.write(json.dumps(perfil, ensure_ascii=False))
+            except FileExistsError:
+                return {"gravado": arquivo.name, "aviso": "este perfil ja estava no PC"}
+            self._perfis_recentes.append(agora)
+        return {"gravado": arquivo.name}
 
     # ---------------------------------------------------------- navegador de teste do Qwen do celular
     def navegador_ler(self, url):
@@ -1313,6 +1370,8 @@ def cria_servidor(ponte, token, porta=PORTA_PADRAO, host="127.0.0.1", log=None, 
                 except UnicodeDecodeError:
                     raise ErroPonte(400, "o texto precisa ser UTF-8")
                 return ponte.entregar(q.get("nome"), texto, self._origem())
+            if metodo == "PUT" and rota == "telemetria/perfil":
+                return ponte.telemetria_receber(q.get("nome"), self._corpo())
             raise ErroPonte(404, "rota desconhecida")
 
     class Servidor(socketserver.ThreadingMixIn, http.server.HTTPServer):

@@ -198,3 +198,30 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
 - Tela inicial da Samsung em "Apenas a Tela inicial" (sem gaveta), 5 páginas (a 5ª vazia, para o papel rolante mostrar a imagem inteira); papel rolante com acessibilidade própria (não desligue). Nunca mude a ordem dos ícones.
 - Telefone da Samsung removido; o padrão é o Fossify Telefone (a emergência continua no app da Samsung).
 - Segunda tela: no PC, atalho "Segunda tela"; aqui, o Moonlight.
+
+## Repasse do ARENA: partida entre casas (10/11) [Provado 10/11 na rede de casa]
+- O que é: o A12 passa os dados de uma casa para a outra quando dois alunos jogam juntos pelo ARENA ("Estamos em casas diferentes"), por um código de 6 números, sem lista pública. O PC é só mais um jogador.
+- No Termux: `repasse ligar | desligar | estado | registro | testar`. Sobe sozinho quando o celular liga (linha no `iniciar-a12`). Porta 55440 TCP; parado, perto de 0% de CPU; não grava endereço de ninguém.
+- Instalar ou atualizar (do PC, com o cabo): `python C:\Projetos\univo-sync\scripts\repasse_a12.py instalar` (copia o `repasse_proprio.py` do ARENA para `~/arena-repasse/`).
+- Para a internet chegar nele: FortiGate (VIP e regra 6 no `provisionar_rede.py` do univo-sync) e porta 55440 encaminhada no roteador da operadora. Explicação das decisões: `C:\Projetos\arena-console\docs\REPASSE-PROPRIO.md`.
+
+## Modelos locais da IA no cartão SD (13/11) [Provado 13/11 no A12]
+- `~/modelos/qwen.gguf` e `qwen2.5-1.5b.gguf` (1,5 GB) foram para `/storage/1A2B-3C4D/Android/data/com.termux/files/modelos`;
+  em `~/modelos` ficam atalhos (o `ia chat` e o `ia local` não mudaram). Abre do cartão em ~9 s, 14 tokens/s no 0,5B.
+- Programa não roda do cartão (o Android não deixa executar de lá): Qwen Code, OmniRoute, glibc e OpenCode ficam na
+  memória interna. A memória do Univo (`memoria`) já mora no cartão desde 05/11.
+
+## IA sem o PC: `ia glm` (OpenCode + GLM 5.3 Flash grátis) (13/11) [Provado 13/11 no A12]
+- O que é: o agente OpenCode com o GLM 5.3 Flash grátis do OpenCode Zen, direto do celular, só com internet: sem PC, sem OmniRoute, sem conta. Substitui o Ollama do PC (removido em 13/11).
+- Usar: `ia glm` (abre na pasta do projeto), `ia glm "pedido"` (já com o pedido). No `ia` automático, se a nuvem do PC estiver fora, ele vem antes do modelo do celular. `ia status` mostra se está pronto.
+- Instalar ou atualizar: `ia glm instalar` (glibc-runner do repositório oficial do Termux + binário oficial 1.19.5, SHA-256 conferido; fica em `~/opt/opencode`).
+- Configuração em `~/.config/opencode/opencode.jsonc`: personalidade do `~/.qwen/QWEN.md` e as mesmas travas (deny) do Qwen; o `ia` só completa o que falta.
+- Medido: ~21 s por resposta curta, ~0,5 GB de memória no pico. O grátis é "por tempo limitado"; sem retenção nem treino pela doc. Nunca mande dado de aluno.
+
+## Relatorio de acompanhamento do estudante (pedido do professor, 17/11) [Ordoc; testado com aluno ficticio]
+- O que e: o documento "tudo o que o estudante fez e o que falta nas plataformas" (EP + Tarefa SP), para coordenacao, conselho e responsaveis.
+- Quem faz: o app Ordoc, no aparelho (tela "Relatorio do aluno"). O Univo NUNCA recebe nem guarda o nome, a nota ou a tela do aluno.
+- Passo a passo: abrir o Ordoc nessa tela -> o professor digita nome, turma e escola -> "Gerar" (marca "Ler a EP de novo" se faz tempo que nao le; leva minutos) -> confere -> "Copiar o documento".
+- Precisa: Sala do Futuro logada dentro do Ordoc (a EP e o Tarefa SP entram por ela). Login e do professor.
+- Homonimos na turma: o Ordoc nao chuta, pede o nome completo. Fonte que falhou aparece como NAO LIDA, nunca como "nao fez".
+- Nome nao encontrado: escreva como esta na chamada (17/11: 'y' em vez de 'i' e sem o sobrenome do cadastro nao achou); o Ordoc mostra os nomes parecidos da turma para o professor tocar no certo. A 1a leitura da EP leva ~40 min; as proximas usam a leitura guardada.

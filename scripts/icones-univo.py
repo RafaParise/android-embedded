@@ -7,7 +7,7 @@
   python scripts/icones-univo.py tudo       os tres
 
 Pasta: diagnostico/icones-Univo/ (fora do git: os originais sao arte de terceiros).
-Cores: so preto #000000, verde puro #00FF41, cinza #909090 e branco #FFFFFF (sem verde escuro: pedido do Rafael).
+Cores: so preto #000000, azul do Windows #0078D4, cinza #909090 e branco #FFFFFF (12/11: azul do Windows no lugar do verde puro; sem tom escuro).
 Como aplicar: a tela inicial da Samsung NAO aceita pacote de icones de terceiros [Provavel]; caminhos possiveis em
 memoria/PLANO-UNIVO.md (Theme Park do Good Lock, que pede conta Samsung, ou um launcher com pacote de icones).
 """

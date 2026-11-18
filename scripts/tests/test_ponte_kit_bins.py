@@ -1,4 +1,4 @@
-"""Testes dos comandos pequenos do kit do celular (projeto, qwen-pc, boot/iniciar-a12) e do QWEN.md, com bash de verdade e HOME falso.
+"""Testes dos comandos pequenos do kit do celular (projeto, boot/iniciar-a12) e do QWEN.md, com bash de verdade e HOME falso.
 
 Nada toca o celular, o adb nem a rede: curl, pgrep, sshd, saida e sleep sao falsos, dentro de uma pasta temporaria.
 """
@@ -42,22 +42,11 @@ def test_projeto_aceita_nome_comum_e_cria_a_pasta(tmp_path):
     home = tmp_path / "home"
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
-    _falso(fakebin, "qwen-pc", 'echo "abriu $1"')
+    _falso(fakebin, "ia", 'echo "abriu $1"')
     rc, saida = _roda(KIT / "bin" / "projeto", ["meu-app.v2"], home, path_extra=str(fakebin))
     assert rc == 0 and "abriu " + str(home / "projetos" / "meu-app.v2") in saida, saida
     assert (home / "projetos" / "meu-app.v2").is_dir()
 
-
-def test_qwen_pc_nao_ensina_a_ponte_crua_do_ollama(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    fakebin = tmp_path / "fakebin"
-    fakebin.mkdir()
-    _falso(fakebin, "curl", "exit 7")
-    rc, saida = _roda(KIT / "bin" / "qwen-pc", [str(home)], home, path_extra=str(fakebin))
-    assert rc == 1 and "11435" in saida, saida
-    assert "adb reverse" not in saida, "o adb reverse escuta em todas as interfaces do celular: so pelo termux.ps1, com o sim do Rafael"
-    assert "-Pontes" in saida and "-FecharPontes" in saida and "sim" in saida and "ia pc" in saida
 
 
 def test_boot_registra_o_resultado_real_do_sshd_e_do_guarda(tmp_path):

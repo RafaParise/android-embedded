@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
 done
 [ $cfg = 1 ] && { cat > "$FAKE_ESTADO/curl-config.txt"; [ -n "$hdr" ] || hdr=$(cat "$FAKE_ESTADO/curl-config.txt"); }
 if [ -n "$pedido" ]; then cat "$pedido" > "$FAKE_ESTADO/pedido.json"; stat -c '%a' "$pedido" > "$FAKE_ESTADO/pedido.modo"; fi
-alvo="${url#http://}"; hp="${alvo%%/*}"; caminho="/${alvo#*/}"
+alvo="${url#http://}"; alvo="${alvo#https://}"; hp="${alvo%%/*}"; caminho="/${alvo#*/}"
 if ! grep -qx "$hp" "$FAKE_MUNDO" 2>/dev/null; then [ $quer_codigo = 1 ] && printf '000'; exit 7; fi
 codigo=200; corpo='{}'
 chave_ok=chave-de-teste   # o OmniRoute do PC; a reserva (127.0.0.1:20129, ou a 20128 quando a ponte aponta para ela) so aceita a chave local
@@ -311,7 +311,9 @@ def test_ajuda_mostra_o_cabecalho_inteiro_ate_a_ultima_linha(amb):
 def test_status_sem_nada_ao_alcance_mostra_quatro_linhas_fora_e_nao_abre_o_qwen(amb):
     rc, saida = amb.roda("status")
     assert rc == 0
-    assert saida.count("[--]") == 4 and saida.count("[ok]") == 1  # nuvem fora, PC fora, ponte sem token, 1,5B nao instalado; o 0,5B esta instalado
+    # nuvem fora, OpenCode nao instalado, PC fora, ponte sem token, 1,5B nao instalado; o 0,5B esta instalado
+    assert saida.count("[--]") == 5 and saida.count("[ok]") == 1
+    assert "OpenCode + GLM 5.3 Flash gratis (sem PC): nao instalado - ia glm instalar" in saida
     assert "Nuvem (OmniRoute): fora" in saida and "modelo 0,5B" in saida and "modelo 1,5B nao instalado" in saida
     assert "Ponte do PC (projeto ao vivo, skills, caixa de recados): sem o token" in saida and "ponte-pc.ps1 -Parear" in saida
     assert not amb.chamadas("qwen") and not amb.chamadas("socat")
@@ -566,6 +568,7 @@ def test_auto_sem_nuvem_e_sem_pc_abre_a_conversa_do_celular_e_nao_o_qwen(amb):
     assert not amb.chamadas("qwen")
     (chat,) = amb.chamadas("llama-cli")
     assert "qwen.gguf" in chat and "-sys" in chat
+    assert "Voce e o UNIVO" in chat and "Nada de bajulacao" in chat, "o modelo pequeno recebe a persona compacta (persona.py)"
 
 
 def test_chat_sem_o_modelo_instalado_avisa(amb):
@@ -910,6 +913,8 @@ def test_qwen_manda_a_pergunta_ao_modelo_27b_pela_tailscale_e_imprime_so_a_respo
     assert pedido["max_tokens"] == 1500
     assert [m["role"] for m in pedido["messages"]] == ["system", "user"]
     assert "portugues" in pedido["messages"][0]["content"]
+    assert "Voce e o UNIVO" in pedido["messages"][0]["content"] and "Nada de bajulacao" in pedido["messages"][0]["content"]
+    assert "texto limpo" in pedido["messages"][0]["content"], "resumo/traducao pedidos saem sem ironia no meio"
     assert _o_que_foi_perguntado(amb) == "Qual a capital da Franca?"
     assert len(_pedidos_de_chat(amb)) == 1 and f"{PC_IP}:20128/v1/chat/completions" in _pedidos_de_chat(amb)[0]
     assert "Content-Type: application/json" in _pedidos_de_chat(amb)[0] and " -s " in _pedidos_de_chat(amb)[0], "JSON declarado e sem barra de progresso"
@@ -1404,3 +1409,95 @@ def test_univo_offline_percebe_a_volta_da_internet_e_reabre_completo_uma_vez(amb
 def test_sem_univo_a_conversa_nao_vigia_a_rede(amb):
     rc, saida = amb.roda("chat", env_extra={"IA_VIGIA_REDE": "0.1"})
     assert rc == 0 and "A internet voltou" not in saida and "Reabrindo" not in saida
+
+
+# ---- ia glm: OpenCode + GLM 5.3 Flash gratis, so com internet (13/11/2026) ----
+FALSO_GRUN = """#!/bin/bash
+echo "grun $*" >> "$FAKE_LOG"
+"""
+
+
+def poe_opencode(amb):
+    """O OpenCode instalado: o binario em ~/opt/opencode e o glibc-runner (grun) falso, que so anota a chamada."""
+    pasta = amb.home / "opt" / "opencode"
+    pasta.mkdir(parents=True)
+    binario = pasta / "opencode"
+    binario.write_text("#!/bin/bash\n", encoding="utf-8")
+    binario.chmod(0o755)
+    amb.poe_falso("grun", FALSO_GRUN)
+
+
+def test_glm_sem_instalar_avisa_e_nao_abre_nada(amb):
+    rc, saida = amb.roda("glm")
+    assert rc == 1 and "ia glm instalar" in saida
+    assert not amb.chamadas("qwen") and not amb.chamadas("grun")
+
+
+def test_glm_sem_internet_nao_abre_o_opencode(amb):
+    poe_opencode(amb)
+    rc, saida = amb.roda("glm")
+    assert rc == 1 and "Sem internet" in saida and not amb.chamadas("grun")
+
+
+def test_glm_abre_o_opencode_com_o_pedido_e_grava_a_configuracao(amb):
+    poe_opencode(amb)
+    amb.no_ar("opencode.ai")
+    rc, saida = amb.roda("glm", "arrume o script")
+    assert rc == 0, saida
+    chamada = amb.chamadas("grun")
+    assert len(chamada) == 1 and str(amb.home / "opt" / "opencode" / "opencode") in chamada[0]
+    assert chamada[0].endswith("--prompt arrume o script")
+    assert not amb.chamadas("qwen")
+    if PYTHON3:
+        cfg = json.loads((amb.home / ".config" / "opencode" / "opencode.jsonc").read_text(encoding="utf-8"))
+        assert cfg["model"] == "opencode/glm-5.3-flash-free" and cfg["share"] == "disabled"
+        assert cfg["permission"]["bash"]["adb *"] == "deny" and cfg["permission"]["bash"]["pm move*"] == "deny"
+
+
+def test_glm_nao_troca_o_que_o_rafael_escolheu(amb):
+    poe_opencode(amb)
+    amb.no_ar("opencode.ai")
+    cfg = amb.home / ".config" / "opencode" / "opencode.jsonc"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('{"model": "do-rafael"}\n', encoding="utf-8")
+    assert amb.roda("glm")[0] == 0
+    if PYTHON3:
+        dados = json.loads(cfg.read_text(encoding="utf-8"))
+        assert dados["model"] == "do-rafael" and dados["share"] == "disabled"
+
+
+def test_glm_completa_o_arquivo_vazio_que_o_opencode_cria(amb):
+    """Na 1a execucao o OpenCode cria o arquivo so com o $schema (visto no A12): o ia tem que completar."""
+    poe_opencode(amb)
+    amb.no_ar("opencode.ai")
+    cfg = amb.home / ".config" / "opencode" / "opencode.jsonc"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('{\n  "$schema": "https://opencode.ai/config.json"\n}', encoding="utf-8")
+    assert amb.roda("glm")[0] == 0
+    if PYTHON3:
+        assert json.loads(cfg.read_text(encoding="utf-8"))["model"] == "opencode/glm-5.3-flash-free"
+
+
+def test_glm_nao_mexe_em_configuracao_com_comentario(amb):
+    poe_opencode(amb)
+    amb.no_ar("opencode.ai")
+    cfg = amb.home / ".config" / "opencode" / "opencode.jsonc"
+    cfg.parent.mkdir(parents=True)
+    texto = '{\n  // meu\n  "model": "x"\n}\n'
+    cfg.write_text(texto, encoding="utf-8")
+    assert amb.roda("glm")[0] == 0
+    assert cfg.read_text(encoding="utf-8") == texto
+
+
+def test_auto_sem_nuvem_usa_o_glm_antes_do_pc(amb):
+    poe_opencode(amb)
+    amb.no_ar("opencode.ai", f"{PC_IP}:11434")
+    rc, saida = amb.roda()
+    assert rc == 0 and "GLM gratis" in saida
+    assert amb.chamadas("grun") and not amb.chamadas("qwen")
+
+
+def test_status_mostra_o_glm_pronto(amb):
+    poe_opencode(amb)
+    amb.no_ar("opencode.ai")
+    assert "[ok]  OpenCode + GLM 5.3 Flash gratis (sem PC, so internet): pronto - ia glm" in amb.roda("status")[1]

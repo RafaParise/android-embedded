@@ -204,3 +204,45 @@ def test_manifesto_le_nome_com_espaco_e_ignora_fora(m, monkeypatch):
 def test_termux_nao_leva_chaves(m):
     for x in (".omniroute", ".env", ".ssh", "*.gguf"):
         assert x in m.TERMUX_FORA
+
+
+
+def test_listagem_vazia_ou_pela_metade_aborta_sem_mexer_no_indice(m):
+    """12/11/2026: sem cabo, a conexao pode cair no meio do `find`; antes isso apagava o indice da copia inteiro."""
+    with pytest.raises(SystemExit) as e:
+        m.confere_listagem({}, {"a": 1})
+    assert "nenhum arquivo" in str(e.value)
+    with pytest.raises(SystemExit) as e:
+        m.confere_listagem({"a": "x"}, {"a": 1, "b": 2, "c": 3})
+    assert "menos da metade" in str(e.value)
+    m.confere_listagem({"a": "x", "b": "y"}, {"a": 1, "b": 2, "c": 3})   # dois tercos: segue
+
+
+def test_dados_moveis_pede_confirmacao_e_sem_teclado_e_nao(m, monkeypatch):
+    m.ROTA["tipo"] = "dados"
+    monkeypatch.setattr("builtins.input", lambda *_: "s")
+    assert m.confirma_dados_moveis("trazer 3 arquivo(s)")
+
+    def sem_teclado(*_):
+        raise EOFError
+    monkeypatch.setattr("builtins.input", sem_teclado)
+    assert not m.confirma_dados_moveis("trazer 3 arquivo(s)")
+    m.ROTA["tipo"] = "wifi"
+    assert m.confirma_dados_moveis("trazer 3 arquivo(s)")
+    m.ROTA["tipo"] = None
+
+
+def test_comando_que_perde_a_conexao_reconecta_e_repete(m, monkeypatch):
+    chamadas, ligou = [], []
+
+    class R:
+        def __init__(self, cod, err):
+            self.returncode, self.stdout, self.stderr = cod, b"ok", err.encode()
+
+    respostas = [R(1, "error: closed"), R(0, "")]
+    monkeypatch.setattr(m.subprocess, "run", lambda cmd, **k: chamadas.append(cmd) or respostas.pop(0))
+    monkeypatch.setattr(m, "liga_celular", lambda *a, **k: ligou.append(1))
+    m.ROTA.update(serial="RQ8", tipo="cabo")
+    assert m.adb("shell", "true") == (0, "ok", "")
+    assert len(chamadas) == 2 and ligou == [1]
+    m.ROTA.update(serial=None, tipo=None)

@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Cria (se precisar) ~/projetos/<nome> com git e um QWEN.md de projeto, e abre o Qwen Code nele.
-# Uso: projeto <nome> [local|nuvem]     (sem o 2o argumento usa o cerebro do PC; "nuvem" = OmniRoute, precisa da chave; "local" = modelo pequeno do celular)
+# Uso: projeto <nome> [local|nuvem]     (abre pelo `ia`: sem o 2o argumento o automatico; "nuvem" = ia codigo; "local" = ia local, o modelo do celular)
 nome="$1"
 [ -n "$nome" ] || { echo "Uso: projeto <nome> [local|nuvem]"; ls ~/projetos 2>/dev/null; exit 1; }
 case "$nome" in
@@ -15,7 +15,7 @@ if [ ! -d "$dir" ]; then
   echo "Projeto criado em $dir (git iniciado). Edite o QWEN.md dele dizendo o objetivo."
 fi
 case "$2" in
-  local) exec qwen-local "$dir" ;;
-  nuvem) exec qwen-nuvem "$dir" ;;
-  *) exec qwen-pc "$dir" ;;
+  local) exec ia local "$dir" ;;
+  nuvem) exec ia codigo "$dir" ;;
+  *) exec ia "$dir" ;;
 esac

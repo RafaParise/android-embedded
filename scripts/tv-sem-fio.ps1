@@ -1,12 +1,13 @@
 # TV sem fio (Miracast, Win+K) com a melhor imagem e o menor atraso possiveis. Pedido do Rafael (05/11/2026).
 # Analogia: o PC tem UMA antena e duas conversas: o roteador em 5/6 GHz e a TV em 2,4 GHz (a TV so fala essa faixa).
 # Alternar entre as duas e como um interprete correndo entre duas salas: cada corrida e atraso e engasgo. No "modo TV"
-# o PC entra no Wi-Fi de 2,4 GHz e as duas conversas ficam na mesma sala (mesmo canal): menos atraso, internet do PC
-# mais lenta enquanto durar. A imagem vai na resolucao nativa da TV (1920x1080 a 60 Hz) em vez de 1024x768 esticado.
+# o PC entra no Wi-Fi de 2,4 GHz e as duas conversas ficam na mesma sala (mesmo canal): menos atraso. Desde 13/11/2026
+# a internet do PC vai pelo cabo do FortiGate (o Wi-Fi e so reserva, metrica 50): o modo TV so a deixa mais lenta se o
+# cabo cair e o Windows passar para o Wi-Fi. A imagem vai na resolucao nativa da TV (1920x1080 a 60 Hz) em vez de 1024x768 esticado.
 # Uso:  pwsh -File tv-sem-fio.ps1 status
 #       pwsh -File tv-sem-fio.ps1 imagem [-Largura 1920 -Altura 1080]  so a resolucao da TV (TV ja conectada pelo Win+K)
 #       pwsh -File tv-sem-fio.ps1 ligar     modo TV: o PC passa para a rede de 2,4 GHz do roteador (mesmo nome sem 5G)
-#       pwsh -File tv-sem-fio.ps1 desligar  volta o PC para a rede de 5 GHz (internet rapida de novo)
+#       pwsh -File tv-sem-fio.ps1 desligar  volta o PC para a rede de 5 GHz (a reserva da internet fica rapida de novo)
 # O melhor de verdade e o cabo HDMI: imagem sem compressao e atraso quase zero. Precisa de administrador para a placa.
 param([ValidateSet('status', 'imagem', 'ligar', 'desligar')][string]$Acao = 'status', [int]$Largura = 1920, [int]$Altura = 1080,
       [int]$Hz = 60, [string]$Placa = 'Wi-Fi')

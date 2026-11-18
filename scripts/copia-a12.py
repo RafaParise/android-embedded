@@ -11,6 +11,9 @@ firmware assinado. Celular que nem liga: primeiro o firmware original da Samsung
   python scripts/copia-a12.py restaurar           mostra o plano (nao muda nada)
   python scripts/copia-a12.py restaurar --aplicar [--so apps,papeis,lotes,permissoes,ajustes,arquivos,termux]
 
+Conexao (12/11/2026): cabo, Wi-Fi ou dados moveis (Tailscale, porta 5555), trocando sozinha no meio; comando que perde a
+conexao reconecta e repete; pelos dados moveis, mandar ou trazer arquivos pede confirmacao (gasta a franquia).
+
 Fica fora do git e do Drive: C:\\Users\\passo\\Backups\\A12-copia (tem SMS, contatos e chamadas; o script nunca os imprime).
 A restauracao nunca apaga arquivo do celular, nem app instalado fora da copia.
 """
@@ -26,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
@@ -43,9 +47,85 @@ TERMUX_FORA = (".omniroute", ".env", ".ssh", ".cache", ".npm", "node_modules", "
 PESSOAIS = {"sms.txt": "content://sms", "contatos.txt": "content://contacts/phones", "chamadas.txt": "content://call_log/calls"}
 
 
+# --- Conexao: cabo, Wi-Fi ou dados moveis, trocando sozinha (12/11/2026, pedido do Rafael) ------------------------------
+# O adb-remoto.py escolhe: cabo, senao a Tailscale pela porta 5555 (vale no Wi-Fi e nos dados moveis). O serial escolhido
+# vai em ANDROID_SERIAL, que o adb usa em todo comando sem -s. Comando que perde a conexao (cabo solto, Wi-Fi caiu)
+# reconecta pelo que houver e repete; no sem fio, se o cabo aparecer, os comandos seguintes passam a ele.
+ROTA = {"serial": None, "tipo": None, "olhou_cabo": 0.0}
+TEMPO_RECONEXAO = 90
+PERDEU_CONEXAO = ("no devices", "not found", "device offline", "error: closed", "protocol fault", "connection reset",
+                  "failed to connect", "cannot connect")
+
+
+def remoto():
+    spec = importlib.util.spec_from_file_location("adb_remoto", RAIZ / "scripts" / "adb-remoto.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def liga_celular(espera=TEMPO_RECONEXAO, avisar=True):
+    """Acha o celular (cabo primeiro) e fixa o serial em ANDROID_SERIAL. Sem nenhum em `espera` segundos: aborta."""
+    import contextlib
+    import io
+    r = remoto()
+    fim = time.monotonic() + espera
+    while True:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ok = r.garantir() == 0
+        cabo = r.tem_cabo()
+        serial = cabo or ("%s:%d" % (r.ip_celular(), r.PORTA) if ok else None)
+        if serial and r.aparelhos().get(serial) == "device":
+            tipo = "cabo" if cabo else r.tipo_sem_fio(serial)
+            if cabo:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    r.garantir_porta(cabo)   # tirar o cabo no meio segue sem fio
+            if avisar and (serial, tipo) != (ROTA["serial"], ROTA["tipo"]):
+                print("  Conexao: " + {"cabo": "cabo", "wifi": "Wi-Fi (Tailscale)", "dados": "DADOS MOVEIS (Tailscale; gasta a franquia)"}[tipo])
+            ROTA.update(serial=serial, tipo=tipo, olhou_cabo=time.monotonic())
+            os.environ["ANDROID_SERIAL"] = serial
+            return serial, tipo
+        if time.monotonic() > fim:
+            sys.exit("ABORTADO: o celular sumiu do cabo e da rede por %d s. Ligue o cabo, ou confira o Wi-Fi/dados e a "
+                     "Tailscale no celular, e rode de novo: o que ja foi copiado e conferido fica." % espera)
+        time.sleep(3)
+
+
+def _passa_ao_cabo():
+    """No sem fio, de 15 em 15 s: o cabo apareceu? Os proximos comandos vao por ele (mais rapido e nao gasta dados)."""
+    if not ROTA["serial"] or ROTA["tipo"] == "cabo" or time.monotonic() - ROTA["olhou_cabo"] < 15:
+        return
+    ROTA["olhou_cabo"] = time.monotonic()
+    r = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=15)
+    if any(len(l.split()) == 2 and l.split()[1] == "device" and ":" not in l.split()[0] for l in r.stdout.splitlines()[1:]):
+        liga_celular()
+
+
 def adb(*a, timeout=600):
-    r = subprocess.run(["adb", *a], capture_output=True, timeout=timeout)
-    return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+    _passa_ao_cabo() if ROTA["serial"] else None
+    for tentativa in range(4):
+        r = subprocess.run(["adb", *a], capture_output=True, timeout=timeout)
+        cod, out, err = r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+        if cod != 0 and ROTA["serial"] and any(x in err.lower() for x in PERDEU_CONEXAO) and tentativa < 3:
+            print("  a conexao com o celular caiu (%s): reconectando..." % err.strip().splitlines()[-1][:80])
+            liga_celular()
+            continue
+        return cod, out, err
+    return cod, out, err
+
+
+def confirma_dados_moveis(oque):
+    """Pelos dados moveis, mandar arquivos gasta a franquia: so com o "s" do Rafael (sem teclado = nao)."""
+    if ROTA["tipo"] != "dados":
+        return True
+    try:
+        resp = input("  O celular esta nos DADOS MOVEIS: %s gasta a franquia. Continuar? (s/N) " % oque).strip().lower()
+    except EOFError:
+        resp = ""
+    if resp != "s":
+        print("  Pulado. Ligue o Wi-Fi ou o cabo e rode de novo (o que ja foi feito fica).")
+        return False
+    return True
 
 
 def sh(cmd, timeout=600):
@@ -55,7 +135,7 @@ def sh(cmd, timeout=600):
 def conferir_aparelho():
     modelo = sh("getprop ro.product.model").strip()
     if modelo != MODELO:
-        sys.exit(f"ABORTADO: esperava {MODELO} com a depuracao USB ligada e autorizada; encontrei {modelo!r}.")
+        sys.exit(f"ABORTADO: esperava {MODELO} conectado (cabo, ou sem fio pela Tailscale) e autorizado; encontrei {modelo!r}.")
 
 
 def bateria_ok(minimo=3):
@@ -122,9 +202,13 @@ def le_json(p, padrao):
 
 
 def grava_json(p, dado):
+    """Grava num temporario e troca de uma vez (os.replace): um Ctrl+C no meio nao deixa o indice da copia pela metade
+    (revisao dos atalhos de 12/11/2026)."""
     p = pathlib.Path(p)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(dado, ensure_ascii=False, indent=1), encoding="utf-8")
+    temporario = p.with_name(p.name + ".gravando")
+    temporario.write_text(json.dumps(dado, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(temporario, p)
 
 
 def le_manifesto_celular():
@@ -232,17 +316,36 @@ def traz_por_tar(lista, base, esperado):
         local.unlink()
 
 
+def confere_listagem(atual, guardado):
+    """Listagem vazia ou muito menor que a copia = a conexao caiu no meio do `find` (comum sem cabo). Sem esta trava a copia
+    apagava o indice inteiro e a restauracao mandava sobrescrever tudo (achado da revisao de 12/11/2026)."""
+    if not atual:
+        sys.exit("ABORTADO: o celular nao listou nenhum arquivo (a conexao caiu?). Nada foi mudado; rode de novo.")
+    if guardado and len(atual) * 2 < len(guardado):
+        sys.exit(f"ABORTADO: o celular listou {len(atual)} arquivo(s), menos da metade dos {len(guardado)} da copia "
+                 "(a conexao caiu no meio?). Nada foi mudado; rode de novo.")
+
+
 def copia_arquivos(dest, aplicar):
     atual = le_manifesto_celular()
     guardado = le_json(dest / "arquivos.json", {})
+    if aplicar:
+        confere_listagem(atual, guardado)   # so quando vai gravar: a simulacao nao mexe em nada
     faltam = sorted(r for r, h in atual.items() if guardado.get(r, {}).get("md5") != h)
     print(f"  arquivos da memoria interna: {len(atual)}, {len(faltam)} a trazer")
     if not aplicar or not faltam:
         return []
+    if not confirma_dados_moveis(f"trazer {len(faltam)} arquivo(s)"):
+        return faltam
     base = dest / "arquivos"
     base.mkdir(parents=True, exist_ok=True)
-    for _ in (1, 2):
-        feitos = traz_por_tar(faltam, base, set(faltam))
+    for _ in (1, 2, 3, 4):   # 4 voltas: sem cabo, uma troca de rede no meio corta o tar e a volta seguinte traz o resto
+        try:
+            feitos = traz_por_tar(faltam, base, set(faltam))
+        except (tarfile.TarError, EOFError, OSError) as falha:
+            print("  a transferencia foi cortada (%s): reconectando e trazendo o que faltou..." % str(falha)[:80])
+            liga_celular()
+            feitos = {}
         for rel, (nome, md5) in feitos.items():
             if md5 == atual[rel]:
                 guardado[rel] = {"pc": nome, "md5": md5}
@@ -324,7 +427,8 @@ def copiar(dest, aplicar, dados_apps=False):
         ab = dest / "dados-apps.ab"
         print(f"  dados de apps: {ab.stat().st_size / 1024**2:.0f} MB" if cod == 0 and ab.exists() else f"  AVISO: backup de dados falhou: {erro[:120]}")
     print(f"Pronta: {dest}. Faltou conferir: {len(falhas) + len(faltando)} arquivo(s). Termux: {'ok' if termux_ok else 'NAO copiado'}.")
-    return 1 if falhas else 0
+    # 1 = APK que nao veio; 2 = so arquivos sem copia conferida (em uso por um app); 0 = tudo conferido.
+    return 1 if falhas else (2 if faltando else 0)
 
 
 def carrega_protegidos():
@@ -394,6 +498,8 @@ def script(*a):
 def arquivos_a_devolver(dest):
     guardado = le_json(dest / "arquivos.json", {})
     atual = le_manifesto_celular()
+    if guardado:
+        confere_listagem(atual, guardado)
     return guardado, sorted(r for r, x in guardado.items() if atual.get(r) != x["md5"])
 
 
@@ -459,9 +565,13 @@ def restaurar(dest, aplicar, so):
             print(f"  {s[0]}: saida {r.returncode}")
             if r.returncode:
                 erros.append(s[0])
+    if "arquivos" in so and devolver and not confirma_dados_moveis(f"devolver {len(devolver)} arquivo(s)"):
+        so = so - {"arquivos"}
     if "arquivos" in so:
         for r in devolver:
-            cod, _, erro = adb("push", caminho_longo(dest / "arquivos" / guardado[r]["pc"]), f"{ORIGEM}/{r}")
+            # o adb do Windows nao aceita o prefixo \?\ (achado da revisao de 12/11): caminho comum, longo so se precisar
+            local = str((dest / "arquivos" / guardado[r]["pc"]).absolute())
+            cod, _, erro = adb("push", local if len(local) < 240 else caminho_longo(local), f"{ORIGEM}/{r}")
             if cod:
                 erros.append(f"arquivo {r}: {erro[:80]}")
         _, restam = arquivos_a_devolver(dest)
@@ -487,6 +597,7 @@ def main():
     so = {x.strip() for x in a.so.split(",") if x.strip()}
     if so - set(ETAPAS):
         sys.exit("--so aceita: " + ",".join(ETAPAS))
+    liga_celular()   # cabo, Wi-Fi ou dados moveis; troca sozinha no meio
     if a.comando == "copiar":
         return copiar(a.destino, a.aplicar, a.dados_apps)
     return restaurar(a.destino, a.comando == "restaurar" and a.aplicar, so)

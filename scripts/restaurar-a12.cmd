@@ -1,7 +1,7 @@
 @echo off
 title Restaurar o celular a partir da copia
 cd /d "%~dp0.."
-echo Ligue o celular no cabo, com a depuracao USB ligada e a conta Google ja entrada.
+echo Cabo, Wi-Fi ou dados moveis (Tailscale), com a conta Google ja entrada no celular.
 echo Primeiro mostro o plano. Nada muda sem a sua confirmacao.
 echo.
 python -B scripts\copia-a12.py restaurar

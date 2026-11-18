@@ -1,0 +1,40 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# repasse - o repasse do ARENA neste celular: partida "Estamos em casas diferentes" entre alunos em casas diferentes,
+# por um codigo de 6 numeros, sem a lista publica da internet (codigo e explicacao: servidor\repasse_proprio.py do ARENA,
+# github.com/RafaParise/arena-console). O A12 fica sempre ligado na tomada, entao e' ele quem passa os dados de uma casa
+# para a outra; o PC do Rafael e' so mais um jogador.
+#   repasse ligar | desligar | estado | registro | testar
+# Parado nao gasta: o programa dorme ate alguem ligar na porta (perto de 0% de CPU). Nao grava nada em disco alem do
+# registro de inicio e fim (sem endereco de ninguem). Porta: REPASSE_PORTA (padrao 55440, TCP).
+# Instalar ou atualizar (do PC, com o cabo): python C:\Projetos\univo-sync\scripts\repasse_a12.py instalar
+set -u
+PROGRAMA="$HOME/arena-repasse/repasse_proprio.py"
+BASE="$HOME/.cache/repasse"
+PID="$BASE/repasse.pid"
+REG="$BASE/registro"
+PORTA="${REPASSE_PORTA:-55440}"
+mkdir -p "$BASE"
+
+vivo() { [ -f "$PID" ] && kill -0 "$(cat "$PID" 2>/dev/null)" 2>/dev/null; }
+
+case "${1:-estado}" in
+  ligar)
+    if vivo; then echo "o repasse ja esta ligado (porta $PORTA)"; exit 0; fi
+    if [ ! -f "$PROGRAMA" ]; then echo "falta $PROGRAMA: instale pelo PC (repasse_a12.py instalar)"; exit 1; fi
+    nohup nice -n 5 python "$PROGRAMA" --servir --porta "$PORTA" >> "$REG" 2>&1 < /dev/null &
+    echo $! > "$PID"
+    sleep 1
+    if vivo; then echo "$(date '+%F %T') ligado na porta $PORTA" >> "$REG"; echo "repasse ligado (porta $PORTA)"
+    else echo "o repasse nao subiu: veja 'repasse registro'"; exit 1; fi ;;
+  desligar)
+    if vivo; then kill "$(cat "$PID")"; echo "$(date '+%F %T') desligado" >> "$REG"; fi
+    rm -f "$PID"; echo "repasse desligado" ;;
+  estado)
+    if vivo; then echo "ligado (porta $PORTA, processo $(cat "$PID"))"; else echo "desligado"; fi ;;
+  registro)
+    tail -n 30 "$REG" 2>/dev/null || echo "sem registro ainda" ;;
+  testar)
+    python "$PROGRAMA" --testar "127.0.0.1:$PORTA" ;;
+  *)
+    sed -n '2,9p' "$0" ;;
+esac

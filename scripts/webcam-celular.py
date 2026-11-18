@@ -504,6 +504,24 @@ def espera_parar(sc):
         print("o scrcpy caiu (rede ou celular): desligando tudo")
 
 
+def _remoto():
+    """O adb-remoto.py (troca automatica de conexao: Espelho), carregado pelo caminho (nome com hifen)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("adb_remoto", AQUI / "adb-remoto.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _presentes():
+    r = {}
+    for linha in roda(["adb", "devices"], 15).stdout.splitlines()[1:]:
+        p = linha.split()
+        if len(p) == 2:
+            r[p[0]] = p[1]
+    return r
+
+
 def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False, fonte="camera", som=False):
     confere(tamanho)
     avisa_permissoes()
@@ -518,7 +536,28 @@ def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False,
         limpa_sentinela()
     if PARAR.exists():
         PARAR.unlink()
-    sc = subprocess.Popen(args_scrcpy(serial, frontal, tamanho, fps, provar, tipo, fonte, som), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 12/11/2026 (pedido do Rafael): sem cabo, no Wi-Fi e nos dados moveis, e trocando SOZINHO no meio: tirou o cabo =
+    # segue pela rede; ligou o cabo = passa a ele. O scrcpy reabre com o mesmo titulo, e o OBS pega a janela de novo.
+    estado_troca = {"gravando": False}
+
+    def escolher():
+        try:
+            return escolhe_rota(so_rede)
+        except Erro:
+            return None, None
+
+    def ao_trocar(novo, novo_tipo):
+        if fonte == "camera":
+            tela(novo, "apagar")
+        if not provar:
+            aviso_celular(novo, fonte, estado_troca["gravando"])
+            time.sleep(3)
+            corrige_faixas()   # pelos dados moveis a imagem chega com outra taxa: confere a tarja de novo
+
+    sc = _remoto().Espelho(escolher, lambda s, tp: args_scrcpy(s, frontal, tamanho, fps, provar, tp, fonte, som), serial, tipo,
+                           ao_trocar=ao_trocar,
+                           iniciar=lambda cmd, **kw: subprocess.Popen(cmd, **kw), cabo=lambda: "" if so_rede else serial_usb(roda(["adb", "devices"], 15).stdout),
+                           presentes=_presentes, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).start()
     obs = None
     gravando = False
     try:
@@ -542,6 +581,7 @@ def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False,
             corrige_faixas()  # 06/11: faixa preta pelos dados moveis; mede, corta a tarja, encaixa e confere
         if gravar:
             gravando = bool(grava_no_obs("iniciar"))
+            estado_troca["gravando"] = gravando
         if not provar:  # icone fixo na barra do celular enquanto estiver no OBS (some ao desligar)
             print("aviso na barra do celular: " + ("ligado" if aviso_celular(serial, fonte, gravando) else "nao deu (Termux fechado?)"))
         if sem_espera:
@@ -561,6 +601,7 @@ def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False,
         if not so_camera:
             print('\nPronto: no programa da chamada escolha a camera "OBS Virtual Camera".')
         print("Deixe a janela do celular aberta (pode ficar atras das outras, nao minimize).")
+        print("Pode tirar ou ligar o cabo no meio: a camera troca para o Wi-Fi ou os dados moveis (e volta) sozinha.")
         print("Quando acabar, volte aqui e aperte Enter para desligar.\n")
         input()
         return 0
@@ -572,12 +613,15 @@ def liga(frontal, tamanho, fps, provar, so_rede, sem_espera=False, gravar=False,
         if obs is not None:
             try:
                 fecha_obs()
-            except subprocess.TimeoutExpired:
+            except (subprocess.TimeoutExpired, OSError):
+                # Qualquer falha aqui nao pode pular o resto (o scrcpy, o perfil do OBS, a tela do celular): revisao
+                # dos atalhos de 12/11/2026.
                 tenta(["taskkill", "/F", "/IM", "obs64.exe"])
         if sc.poll() is None:
             sc.terminate()
         if not so_camera:
             devolve_escolha(ini, antes)
+        serial = sc.serial   # a conexao pode ter trocado no meio: desfaz pelo caminho de agora
         if not provar:
             aviso_celular(serial, tirar=True)
         if fonte == "camera":

@@ -13,7 +13,9 @@
 #   cel limpar                      apaga o cache de todos os apps (os dados ficam) · cel otimizar = limpar + fechar apps parados (RAM antes/depois; --tudo para tambem o ScreenStream ocioso)
 #   cel abrir TELA | cel telas      abre a tela de configuracao (wifi, bluetooth, tela, som, bateria, apps, armazenamento, desenvolvedor...)
 #   cel abrir-app PACOTE · cel apps [texto] · cel procurar TEXTO (arquivos, apps e configuracoes)
-#   cel tv                          espelhar na TV: abre a transmissao do Android e diz que apps de espelhamento existem
+#   cel tv [cheia [16:9]|normal|estado]  espelhar na TV (ScreenStream); `cheia` = celular na proporcao da TV (tela sem fio 100%, faixas no
+#                                   celular enquanto isso); `normal` volta e confere; `cel tv` sozinho desfaz o que sobrou
+#   cel tv vigia ligar|desligar|estado  o VIGIA: captura de tela ativa (qualquer app de espelhamento) = celular em 16:9; parou = volta (boot)
 #   cel microfone sempre|gravar|desligado|mudo|ligado|status
 #   cel depuracao manter            mantem a depuracao USB e sem fio ligadas · cel sh "comando"  (qualquer comando do sistema, como o adb shell)
 #   OPERAR APPS: cel ler [TEXTO]    lista numerada do que esta na tela (textos, botoes, campos e o centro de cada um)
@@ -717,9 +719,76 @@ case "${1:-status}" in
   tv)
     # 05/11: este A12 nao tem o Smart View (firmware) e o Miracast do Android fica indisponivel sem ele; o que
     # funciona e o ScreenStream (a tela vai para o navegador da TV ou do PC). O Miracast shortcut foi desativado.
-    precisa; sh_ "monkey -p info.dvkr.screenstream -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1
-    echo "Abri o ScreenStream: toque em Iniciar e abra na TV (ou no PC) o endereco que ele mostra, na mesma rede Wi-Fi."
-    echo "Miracast direto para a TV nao funciona neste A12 (sem Smart View). Outra saida: o celular no PC (Segunda tela) e o PC na TV." ;;
+    # 12/11 (pedido do Rafael: "a tela sem fio 100% preenchida, sem bordas"): `cel tv cheia` poe o celular na proporcao
+    # da TV (16:9 = wm size 720x1280; no celular aparecem faixas pretas enquanto isso), `cel tv normal` volta e CONFERE
+    # pelo tamanho real (hoje o A12 ficou em 720x960 sem voltar), e `cel tv` desfaz sozinho o que tiver sobrado.
+    TV_MARCA="$HOME/.cache/cel-tv-cheia"
+    case "${2:-abrir}" in
+      cheia)
+        precisa; prop="${3:-16:9}"
+        case "$prop" in 16:9) tam=720x1280 ;; 16:10) tam=720x1152 ;; 4:3) tam=720x960 ;; [0-9]*x[0-9]*) tam="$prop" ;;
+          *) echo "Use: cel tv cheia [16:9|16:10|4:3|LARGURAxALTURA]"; exit 2 ;; esac
+        mkdir -p "$HOME/.cache"
+        sh_ "wm size $tam" && echo "$tam" > "$TV_MARCA"
+        echo "Tela do celular em $tam ($prop): a tela sem fio fica 100% preenchida; no celular aparecem faixas pretas enquanto isso."
+        echo "Para voltar: cel tv normal  (confere e desfaz; o proximo 'cel tv' tambem desfaz sozinho)" ;;
+      normal)
+        precisa; sh_ "wm size reset" >/dev/null 2>&1
+        sobrou=$(sh_ "wm size" | tr -d '\r' | grep "Override size" | cut -d: -f2 | tr -d ' ')
+        if [ -n "$sobrou" ]; then echo "ATENCAO: a tela do celular continua forcada em $sobrou. Tente de novo; pelo PC: python scripts\\segunda-tela.py normal"; exit 1; fi
+        rm -f "$TV_MARCA"; echo "Tela do celular no tamanho normal (720x1600)." ;;
+      estado)
+        precisa; sh_ "wm size" | tr -d '\r'
+        [ -f "$TV_MARCA" ] && echo "(modo TV cheia ligado pelo cel: $(cat "$TV_MARCA"); volta com: cel tv normal)"
+        p=$(cat "$HOME/.cache/cel-tv-vigia.pid" 2>/dev/null); if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "vigia da TV: ligado (processo $p)"; else echo "vigia da TV: desligado (cel tv vigia ligar)"; fi ;;
+      vigia)
+        # 12/11: o vigia do celular. Captura de tela ativa (dumpsys media_projection: ScreenStream ou qualquer app de
+        # espelhamento) = celular na proporcao da TV (16:9); captura parou = volta e confere. O espelho pelo PC (scrcpy)
+        # nao passa pelo media_projection: dele cuida o vigia do PC (segunda-tela.py vigia-tv). Sobe no boot do Termux.
+        VPID="$HOME/.cache/cel-tv-vigia.pid"; VREG="$HOME/.cache/cel-tv-vigia.log"
+        case "${3:-estado}" in
+          ligar)
+            p=$(cat "$VPID" 2>/dev/null); if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "vigia da TV ja ligado (processo $p)"; exit 0; fi
+            mkdir -p "$HOME/.cache"; [ -f "$VREG" ] && tail -n 300 "$VREG" > "$VREG.novo" 2>/dev/null && mv -f "$VREG.novo" "$VREG"
+            nohup bash "$(readlink -f "$0" 2>/dev/null || echo "$0")" tv vigia vigiar >> "$VREG" 2>&1 </dev/null &
+            echo $! > "$VPID"; echo "vigia da TV ligado: captura de tela ativa = celular em 16:9 (720x1280); parou = volta." ;;
+          desligar)
+            p=$(cat "$VPID" 2>/dev/null); [ -n "$p" ] && kill "$p" 2>/dev/null; rm -f "$VPID"; echo "vigia da TV desligado" ;;
+          estado)
+            p=$(cat "$VPID" 2>/dev/null); if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "vigia da TV: ligado (processo $p)"; else echo "vigia da TV: desligado"; fi
+            tail -n 5 "$VREG" 2>/dev/null ;;
+          vigiar) # (interno) o laco: sem conexao com o sistema, espera 30 s e tenta de novo (nunca morre)
+            aplicado=0; prop="${CEL_TV_PROPORCAO:-720x1280}"
+            echo "$(date '+%F %T') vigia da TV ligado (proporcao $prop)"
+            while :; do
+              if ! conecta; then sleep 30; continue; fi
+              S=$(serial)
+              ativo=$(sh_ "dumpsys media_projection" 2>/dev/null | tr -d '\r' | sed -n '/^Media Projection:/,$p' | grep -v '^Media Projection:' | grep -c -v '^\s*\(null\)\?\s*$')
+              if [ "${ativo:-0}" -gt 0 ] && [ "$aplicado" = 0 ]; then
+                if sh_ "wm size $prop" >/dev/null 2>&1; then aplicado=1; echo "$prop" > "$TV_MARCA"; echo "$(date '+%F %T') captura de tela ativa: celular em $prop"
+                  command -v termux-notification >/dev/null 2>&1 && timeout 20 termux-notification --id cel-tv --title "TV cheia" --content "Celular em 16:9 enquanto espelha; volta sozinho ao parar." >/dev/null 2>&1; fi
+              elif [ "${ativo:-0}" -eq 0 ] && [ "$aplicado" = 1 ]; then
+                sh_ "wm size reset" >/dev/null 2>&1
+                if sh_ "wm size" | grep -q "Override size"; then echo "$(date '+%F %T') captura parou mas o reset nao pegou; tento de novo"
+                else aplicado=0; rm -f "$TV_MARCA"; echo "$(date '+%F %T') captura parou: celular de volta a 720x1600"
+                  command -v termux-notification >/dev/null 2>&1 && timeout 20 termux-notification-remove cel-tv >/dev/null 2>&1; fi
+              fi
+              sleep "${CEL_TV_INTERVALO:-8}"
+            done ;;
+          *) echo "Use: cel tv vigia ligar|desligar|estado"; exit 2 ;;
+        esac ;;
+      abrir)
+        precisa
+        if [ -f "$TV_MARCA" ] || sh_ "wm size" | grep -q "Override size"; then
+          echo "A tela do celular estava forcada de uma vez anterior: voltando ao normal primeiro."
+          bash "$(readlink -f "$0" 2>/dev/null || echo "$0")" tv normal
+        fi
+        sh_ "monkey -p info.dvkr.screenstream -c android.intent.category.LAUNCHER 1" >/dev/null 2>&1
+        echo "Abri o ScreenStream: toque em Iniciar e abra na TV (ou no PC) o endereco que ele mostra, na mesma rede Wi-Fi."
+        echo "TV 100% preenchida (16:9): cel tv cheia   |   depois: cel tv normal"
+        echo "Miracast direto para a TV nao funciona neste A12 (sem Smart View). Outra saida: o celular no PC (Segunda tela) e o PC na TV." ;;
+      *) echo "Use: cel tv [cheia [16:9|16:10|4:3|LxA] | normal | estado | vigia ligar|desligar|estado]"; exit 2 ;;
+    esac ;;
   microfone)
     precisa
     case "${2:-status}" in

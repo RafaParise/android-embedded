@@ -1,0 +1,44 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# sentinela - o vigia deste celular (univo-sync): temperatura, bateria, memoria, tempo ligado e ping ao gateway, uma
+# amostra por minuto em /sdcard/univo-sync/telemetria/amostras.jsonl (o PC le pelo cabo: scripts\telemetria.py; o Qwen
+# daqui le direto). Com a conf do FortiGate (~/.parise-sentinela.env, so quando o A12 estiver na DMZ) tambem desliga a
+# regra do ADB por calor ou acesso estranho (codigo: C:\Projetos\univo-sync\scripts\sentinela_a12.py).
+#   sentinela ligar | desligar | estado | registro | amostras | uma-vez
+# Parado nao gasta: uma volta a cada 10 s lendo sysfs e /proc; a amostra (termux-api e ping) so a cada minuto.
+# Nunca mede outro aparelho. Instalar ou atualizar (do PC, com o cabo): python C:\Projetos\univo-sync\scripts\instalar_sentinela_a12.py instalar
+set -u
+PROGRAMA="$HOME/univo-sync/sentinela_a12.py"
+BASE="$HOME/.cache/sentinela"
+PID="$BASE/sentinela.pid"
+REG="$BASE/registro"
+AMOSTRAS="/sdcard/univo-sync/telemetria/amostras.jsonl"
+mkdir -p "$BASE"
+
+vivo() { [ -f "$PID" ] && kill -0 "$(cat "$PID" 2>/dev/null)" 2>/dev/null; }
+
+case "${1:-estado}" in
+  ligar)
+    if vivo; then echo "o sentinela ja esta ligado"; exit 0; fi
+    if [ ! -f "$PROGRAMA" ]; then echo "falta $PROGRAMA: instale pelo PC (instalar_sentinela_a12.py instalar)"; exit 1; fi
+    # o registro nao cresce sem fim: fica com as ultimas 500 linhas a cada ligada
+    [ -f "$REG" ] && tail -n 500 "$REG" > "$REG.novo" 2>/dev/null && mv -f "$REG.novo" "$REG"
+    nohup nice -n 10 python "$PROGRAMA" --intervalo 10 >> "$REG" 2>&1 < /dev/null &
+    echo $! > "$PID"
+    sleep 2
+    if vivo; then echo "$(date '+%F %T') ligado" >> "$REG"; echo "sentinela ligado"
+    else echo "o sentinela nao subiu: veja 'sentinela registro'"; exit 1; fi ;;
+  desligar)
+    if vivo; then kill "$(cat "$PID")"; echo "$(date '+%F %T') desligado" >> "$REG"; fi
+    rm -f "$PID"; echo "sentinela desligado" ;;
+  estado)
+    if vivo; then echo "ligado (processo $(cat "$PID"))"; else echo "desligado"; fi
+    [ -f "$AMOSTRAS" ] && echo "amostras: $(wc -l < "$AMOSTRAS") linhas, ultima: $(tail -n 1 "$AMOSTRAS")" ;;
+  registro)
+    tail -n 30 "$REG" 2>/dev/null || echo "sem registro ainda" ;;
+  amostras)
+    tail -n "${2:-10}" "$AMOSTRAS" 2>/dev/null || echo "sem amostra ainda" ;;
+  uma-vez)
+    python "$PROGRAMA" --uma-vez ;;
+  *)
+    sed -n '2,9p' "$0" ;;
+esac
