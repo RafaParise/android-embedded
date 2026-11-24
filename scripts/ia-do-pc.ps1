@@ -1,8 +1,7 @@
-# Confere (e liga, se estiver desligado, menos a Tailscale: essa o Rafael conecta pelo icone dela) o que o celular usa no PC: Tailscale, OmniRoute, Ollama, a ponte do projeto (ponte-pc) e as portas da tailnet.
-# Uso: duplo clique em scripts\ia-do-pc.cmd   ou   pwsh -NoProfile -File scripts\ia-do-pc.ps1 [-SoVerificar] [-AbrirOllama | -FecharOllama]
+# Confere (e liga, se estiver desligado, menos a Tailscale: essa o Rafael conecta pelo icone dela) o que o celular usa no PC: Tailscale, OmniRoute, a ponte do projeto (ponte-pc) e as portas da tailnet.
+# Uso: duplo clique em scripts\ia-do-pc.cmd   ou   pwsh -NoProfile -File scripts\ia-do-pc.ps1 [-SoVerificar]
 #   -SoVerificar   nao liga nem muda nada: so mostra
-#   -AbrirOllama   reabre a porta do Ollama (11434) SO para a tailnet (desde 05/11 ela ja abre por padrao)
-#   -FecharOllama  fecha e mantem fechada ate um -AbrirOllama
+# O Ollama foi removido em 13/11/2026: a porta 11434 dele sai da tailnet (o script fecha se ainda estiver aberta).
 # As portas do OmniRoute (20128) e da ponte do projeto (20130) sao abertas SO para a tailnet (PC e celular). Nada fica exposto na internet nem na rede da escola.
 # Desfazer a do OmniRoute:  tailscale serve --tcp=20128 off      a da ponte:  tailscale serve --tcp=20130 off      Desfazer tudo:  tailscale serve reset
 param([switch]$SoVerificar, [switch]$AbrirOllama, [switch]$FecharOllama)
@@ -13,7 +12,6 @@ function Ok($t)    { Write-Host ('  [ok]  ' + $t) -ForegroundColor Green }
 function Aviso($t) { Write-Host ('  [!!]  ' + $t) -ForegroundColor Yellow }
 $script:nFalhas = 0
 function Falha($t) { $script:nFalhas++; Write-Host ('  [--]  ' + $t) -ForegroundColor Red }
-function FalhaLeve($t) { Write-Host ('  [--]  ' + $t) -ForegroundColor Red }   # nao conta para a mensagem final: o Ollama so serve ao `ia pc`
 function CodigoHttp($url) {
     try { return [int](Invoke-WebRequest -Uri $url -TimeoutSec 5 -UseBasicParsing).StatusCode }
     catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode } else { return 0 } }
@@ -45,22 +43,6 @@ else {
     if (OmniNoAr) { Ok 'OmniRoute ligou' } else { Falha 'OmniRoute nao ligou em 60 s (veja C:\Projetos\kit-ia-professor).' }
 }
 
-# 3) Ollama (modelo local do PC)
-function Tags { try { return Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5 } catch { return $null } }
-$tags = Tags
-if (-not $tags -and -not $SoVerificar) {
-    $ol = (Get-Command ollama -ErrorAction SilentlyContinue).Source
-    if ($ol) {
-        Aviso 'Ollama parado: ligando...'
-        Start-Process -FilePath $ol -ArgumentList 'serve' -WindowStyle Hidden
-        for ($i = 0; $i -lt 15 -and -not $tags; $i++) { Start-Sleep -Seconds 2; $tags = Tags }
-    }
-}
-if ($tags) {
-    if (@($tags.models | Where-Object { $_.name -like 'llama3.2-32k*' }).Count -gt 0) { Ok 'Ollama no ar com o modelo llama3.2-32k (usado por `ia pc`)' }
-    else { Aviso 'Ollama no ar, mas sem o modelo llama3.2-32k (o `ia pc` precisa dele).' }
-} else { FalhaLeve 'Ollama parado (o `ia pc` nao funciona; a nuvem nao precisa dele).' }
-
 # 4) Portas da tailnet (tailscale serve): so a tailnet enxerga
 function ServeAtivo($porta) { ((& $ts serve status 2>&1 | Out-String) -match (':' + $porta + '\b')) }
 function Serve($argumentos) {
@@ -72,19 +54,12 @@ if (ServeAtivo 20128) { Ok 'Porta 20128 (OmniRoute) aberta so para a tailnet' }
 elseif ($SoVerificar) { Falha 'Porta 20128 NAO esta aberta na tailnet: o celular nao alcanca a nuvem sem o cabo.' }
 elseif (Serve @('--bg', '--tcp=20128', 'tcp://127.0.0.1:20128')) { Ok 'Porta 20128 (OmniRoute) aberta so para a tailnet' }
 
-# Ollama: ABERTO por padrao so para a tailnet desde 05/11 (pedido do Rafael: "nao deve depender de cabo para acessar ollama,
-# omniroute e afins"); a tailnet tem so os aparelhos dele. -FecharOllama fecha e deixa a marca diagnostico\ollama-fechado,
-# que mantem fechado ate um -AbrirOllama.
-$marcaOllama = Join-Path (Split-Path $PSScriptRoot -Parent) 'diagnostico\ollama-fechado'
-if ($FecharOllama -and -not $SoVerificar) {
-    if (Serve @('--tcp=11434', 'off')) { [IO.File]::WriteAllText($marcaOllama, 'fechado pelo -FecharOllama'); Ok 'Porta do Ollama (11434) fechada (fica fechada ate -AbrirOllama)' }
-} elseif (-not $SoVerificar -and ($AbrirOllama -or -not (Test-Path $marcaOllama)) -and -not (ServeAtivo 11434)) {
-    if (Serve @('--bg', '--tcp=11434', 'tcp://127.0.0.1:11434')) { Ok 'Porta do Ollama (11434) aberta so para a tailnet' }
+# Ollama removido em 13/11/2026: a porta 11434 nao deve ficar aberta na tailnet (algo novo nela ficaria exposto)
+if (ServeAtivo 11434) {
+    if ($SoVerificar) { Aviso 'Porta 11434 (Ollama, removido em 13/11) ainda aberta na tailnet: rode ia-do-pc.cmd para fechar.' }
+    elseif (Serve @('--tcp=11434', 'off')) { Ok 'Porta 11434 (Ollama, removido em 13/11) fechada na tailnet' }
 }
-if ($AbrirOllama -and -not $SoVerificar -and (Test-Path $marcaOllama)) { [IO.File]::Delete($marcaOllama) }
-if (ServeAtivo 11434) { Ok 'Porta do Ollama (11434) aberta so para a tailnet (o Univo usa sem cabo, com Wi-Fi ou dados moveis)' }
-elseif (Test-Path $marcaOllama) { Aviso 'Porta do Ollama fechada por escolha (-FecharOllama). Para abrir: ia-do-pc.cmd -AbrirOllama' }
-else { FalhaLeve 'Porta do Ollama fechada: o Univo nao alcanca o modelo do PC (rode ia-do-pc.cmd).' }
+if ($AbrirOllama -or $FecharOllama) { Aviso 'O Ollama foi removido em 13/11: -AbrirOllama e -FecharOllama nao fazem mais nada.' }
 
 # 5) Ponte do projeto (ponte-pc, porta 20130): projeto ao vivo, skills e caixa de recados para o Qwen do celular (MCP). So tailnet.
 function PonteNoAr { (CodigoHttp 'http://127.0.0.1:20130/saude') -eq 200 }

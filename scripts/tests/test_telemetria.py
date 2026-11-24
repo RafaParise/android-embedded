@@ -82,6 +82,24 @@ def test_monta_descarta_secao_fora_da_lista(tel):
     assert "apps" not in p and "whatsapp" not in json.dumps(p)
 
 
+def test_inventario_de_programas_so_vale_para_pc(tel):
+    # dados fictícios: celular nunca leva lista de apps; PC (notebook da escola) leva inventário e processos
+    cel = tel.monta({"alvo": "android", "apps": {"total": 1, "lista": [{"n": "App Ficticio"}]}, "sistema": {}}, "cel")
+    assert "apps" not in cel and "sistema" not in cel
+    pc = tel.monta({"alvo": "pc", "apps": {"total": 1, "lista": [{"n": "Editor Ficticio", "v": "2.1"}]},
+                    "processos": {"total": 3}, "sistema": {"firmware": "UEFI"}}, "notebook")
+    assert pc["apps"]["total"] == 1 and pc["processos"]["total"] == 3
+    assert tel.confere(pc)
+    cel["apps"] = {"total": 1}
+    with pytest.raises(ValueError, match="secao"):
+        tel.confere(cel)
+
+
+def test_coletor_pc_tira_versao_dos_nomes(tel):
+    # 4 números com ponto num nome de programa parecem IP e recusariam a ficha inteira
+    assert "function N(" in tel.PS_COLETA and "n = (N $_.DisplayName 60)" in tel.PS_COLETA
+
+
 @pytest.mark.parametrize("rotulo", ["celular 11987654321", "ra 123456789", "fulano@gmail.com", "PC 192.168.0.10"])
 def test_rotulo_com_dado_pessoal_e_recusado(tel, rotulo):
     with pytest.raises(SystemExit):
@@ -138,6 +156,16 @@ def test_ponte_recusa_perfil_ruim(ponte, tel, estrago, status):
     assert e.value.status == status and not ponte.p.perfis.exists()
 
 
+def test_ponte_aceita_inventario_so_de_pc(ponte, tel):
+    # 20/11/2026: a ponte recusava as seções do inventário de PC que o celular já mandava
+    perfil = {**perfil_ok(tel), "apps": {"total": 2, "itens": [{"n": "Programa", "e": "Editora"}]}}
+    with pytest.raises(ponte.m.ErroPonte) as e:
+        ponte.p.telemetria_receber(perfil["id"], json.dumps({**perfil, "alvo": "android"}).encode("utf-8"))
+    assert e.value.status == 422
+    corpo = json.dumps({**perfil, "alvo": "pc", "sistema": {"edicao": "Pro"}, "processos": {"total": 9}}).encode("utf-8")
+    assert ponte.p.telemetria_receber(perfil["id"], corpo) == {"gravado": f"{perfil['id']}.json"}
+
+
 @pytest.mark.parametrize("nome", ["", "../x", "abc", "ABCDEF123456", None, "a" * 13])
 def test_ponte_recusa_nome_ruim(ponte, nome):
     with pytest.raises(ponte.m.ErroPonte) as e:
@@ -154,3 +182,19 @@ def test_ponte_recusa_perfil_grande(ponte):
 def test_instalador_leva_o_comando_telemetria(ponte):
     assert ponte.m.ARQUIVOS_KIT_CELULAR["telemetria"] == "bin/telemetria"
     assert '"Bash(telemetria *)"' in ponte.m._MESCLA_PY
+
+
+def test_pc_rede_termina_depois_de_gravar(tel, monkeypatch, tmp_path):
+    # 20/11/2026: o "coletar pc-rede" gravava a ficha e caía no fim da função com "p" inexistente
+    arq = tmp_path / "fila" / "x.json"
+    enviados = []
+    monkeypatch.setattr(tel, "coleta_pc_rede", lambda rotulo: arq)
+    monkeypatch.setattr(tel, "enviar", lambda quieto=False: enviados.append(quieto))
+    assert tel.principal(["coletar", "pc-rede", "notebook"]) == 0
+    assert len(enviados) == 1
+
+
+def test_coletor_pc_le_as_duas_visoes_do_registro(tel):
+    # 20/11/2026: num PowerShell de 32 bits sumiam os programas de 64 bits (17 de 46)
+    assert "'Registry64', 'Registry32'" in tel.PS_COLETA
+    assert "HKLM:\SOFTWARE\WOW6432Node" not in tel.PS_COLETA

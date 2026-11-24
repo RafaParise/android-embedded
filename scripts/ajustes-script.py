@@ -42,6 +42,10 @@ SETTINGS = [  # (espaco, chave, valor)
     ("global", "wifi_scan_always_enabled", "0"),
     ("global", "ble_scan_always_enabled", "0"),  # apps novos na memoria interna: no cartao adotado perdem papel/estado no reboot
     ("global", "assisted_gps_enabled", "1"),  # A-GPS (SUPL): fix mais rapido para o Organic Maps; reapareceu em 0 em 28/10 depois de mexer na Precisao de Local
+    # 20/11 (Fase 6 do Gemini, adaptada): o "menos desfoque na GPU" que presta neste One UI e o Reduzir transparencia,
+    # ligado e conferido em 05/11 (DECISOES); entra aqui para nao voltar sozinho. O "disable_window_blurs" do Gemini
+    # ficou de fora: so age com o desfoque entre janelas do SurfaceFlinger, desligado no Helio P35 [Provavel].
+    ("system", "accessibility_reduce_transparency", "1"),
 ]
 APPOPS = [  # (pacote, operacao, modo)
     ("com.android.vending", "RUN_IN_BACKGROUND", "ignore"),
@@ -53,11 +57,15 @@ APPOPS = [  # (pacote, operacao, modo)
     ("com.shopee.br", "RUN_IN_BACKGROUND", "ignore"),
     ("com.valvesoftware.android.steam.community", "RUN_IN_BACKGROUND", "ignore"),
     ("br.com.vivo", "RUN_IN_BACKGROUND", "ignore"),  # Meu Vivo: surto de 94% de CPU por ~90 s em segundo plano (27/10); push continua
+    # 20/11: o motor a12m pegou o Meu Vivo 3 vezes no dia a 65-170% de CPU escondido, mesmo com o RUN_IN_BACKGROUND
+    # acima: a restricao forte (= "Restringir uso em segundo plano" da bateria). Abre normal; avisos do Vivo podem atrasar.
+    ("br.com.vivo", "RUN_ANY_IN_BACKGROUND", "ignore"),
     ("org.fossify.filemanager", "MANAGE_EXTERNAL_STORAGE", "allow"),  # o gerenciador de arquivos (no lugar de Meus Arquivos) precisa ver todos os arquivos
 ]
 GRANTS = [("org.fossify.gallery", "android.permission.READ_EXTERNAL_STORAGE")]  # Galeria no lugar da Samsung: so le midias (sem localizacao das fotos)
-BUCKETS = [("com.whatsapp.w4b", "30")]  # 30 = FREQUENT
+BUCKETS: list = []  # 20/11: sem bucket forcado. Decisao de 28/10: o Android recalcula o do WhatsApp Business pelo uso (20), melhor que o 30 do script
 WHITELIST = ["net.sourceforge.opencamera", "app.organicmaps", "org.fossify.calendar"]  # lista de Doze (script, Dashcam; agenda por pesquisa)
+# KDE Connect fica FORA da lista (decisao de 27/10: custo em segundo plano, "limitar e medir"); a Fase 6 do Gemini a punha.
 DEVCFG = [("activity_manager", "max_phantom_processes", "2147483647"),  # Termux sobrevive em segundo plano (limite do Android 12)
           # Doze profundo ~40 min mais cedo com o celular parado, sem cabo e de tela apagada (tecnica do Naptime/ForceDoze, sem root;
           # 06/11: padrao 30+30 min; quem esta na lista do Doze, como Termux, Tailscale, SED e Relogio, nao e afetado)
@@ -72,6 +80,20 @@ def sh(cmd, timeout=60, estrito=False):
         # leitura do estado ANTERIOR: texto de erro do adb ("error: closed") nao pode virar "valor anterior" no registro de desfazer
         sys.exit(f"ABORTADO: a leitura '{cmd}' falhou (adb saiu com {r.returncode}: {(r.stdout + r.stderr).strip()[:80]}); nada foi alterado")
     return (r.stdout + r.stderr).strip()
+
+
+def pular_ausentes():
+    """App da lista que nao esta mais no aparelho (desinstalado para o usuario 0) sai das listas desta execucao: antes, um
+    so app ausente (Shopee, 20/11) abortava tudo e os outros ajustes nunca voltavam ao lugar."""
+    global APPOPS, GRANTS, BUCKETS, WHITELIST
+    instalados = {l.split(":", 1)[1].strip() for l in sh("pm list packages", estrito=True).splitlines() if l.startswith("package:")}
+    ausentes = sorted({p for p, *_ in APPOPS + GRANTS + BUCKETS if p not in instalados} | {p for p in WHITELIST if p not in instalados})
+    APPOPS = [x for x in APPOPS if x[0] in instalados]
+    GRANTS = [x for x in GRANTS if x[0] in instalados]
+    BUCKETS = [x for x in BUCKETS if x[0] in instalados]
+    WHITELIST = [p for p in WHITELIST if p in instalados]
+    for p in ausentes:
+        print(f"  ausente (pulado): {p}")
 
 
 def ler_antes():
@@ -166,6 +188,7 @@ def main():
         print(f"restaurado a partir de {reg}")
         return
 
+    pular_ausentes()
     antes = ler_antes()
     for chave, v in antes["settings"].items():
         alvo = next(val for ns, k, val in SETTINGS if f"{ns}/{k}" == chave)
@@ -178,9 +201,12 @@ def main():
     for pkg, estava in antes["whitelist"].items():
         print(f"  doze   {pkg:<45} {'na lista' if estava else 'fora':<14} -> na lista")
     for pkg, v in antes["buckets"].items():
-        print(f"  bucket {pkg:<45} {v:<14} -> 30")
+        alvo = next(b for p, b in BUCKETS if p == pkg)
+        print(f"  bucket {pkg:<45} {v:<14} -> {alvo}")
     for chave, v in antes["device_config"].items():
-        print(f"  device_config {chave:<38} {str(v):<14} -> 2147483647 (sync de flags {antes['sync_desligado']} -> persistent)")
+        alvo = next(val for ns, k, val in DEVCFG if f"{ns}/{k}" == chave)
+        print(f"  device_config {chave:<38} {str(v):<14} -> {alvo}")
+    print(f"  device_config {'sync de flags':<38} {antes['sync_desligado']:<14} -> persistent")
     if not a.aplicar:
         print("SIMULACAO: nada foi alterado (use --aplicar).")
         return

@@ -9,12 +9,17 @@ Pedido do Rafael: volume para baixo 3 vezes só escurece; sem limite de tempo; c
 | Acender | **Dois toques** curtos (rápidos ou com até 2 s entre eles), ou **volume para cima** |
 | Acende sozinha | **Alarme** tocando ou **chamada** chegando (confere a cada 5 s) |
 | Bloquear | **Botão de ligar**: a tela volta no PIN |
+| Nunca bloqueia sozinho (24/11) | Depois do gesto, se a tela acender e ficar parada perto do tempo de apagar (30 min, menos 1 min), ela **escurece de novo** em vez de dormir e bloquear. Só o botão de ligar (ou bloquear com a tela acesa) desliga isso |
 | Pelo PC | `scripts\tela-apagada.cmd` alterna; `python scripts\tela-apagada.py iniciar, apagar, acender, parar, status` |
 
 ## Como funciona
 Camada preta por cima de tudo mais brilho temporário 0 (`Tela.java`, `tela.dex`, com o usuário `shell`). Nenhum ajuste salvo muda. A cada 5 s ele conta como uso do aparelho (`userActivity`), e é isso que impede o Android de dormir sem o cabo. Se o processo morrer, a camada some sozinha e o `tela-vigia.sh` devolve o brilho.
 
 Memória: gesto parado ~4 MB; tela escura ~70 MB, só enquanto escura.
+
+## Sem bloqueio (24/11/2026)
+Pedido do Rafael: o gesto nunca deixa a tela bloquear e o aparelho fica sempre acessível, com a tela apagada ou quase. Na madrugada de 24/11 a tela acendeu com toques às 00:10 e o Android bloqueou 30 min depois (por volta das 4h, sem uso). Agora a `guarda` do `tela-vigia.sh` (processo filho do vigia, a cada 20 s) usa a marca `tela-guarda.ligada`. A marca entra quando o escuro acaba por toques, volume, alarme, chamada ou pelo PC, e sai com energia, dormiu ou bloqueou. Com ela, se a tela estiver acesa, sem PIN e com o `dumpsys power` dizendo parado ≥ `mScreenOffTimeoutSetting` − 60 s (mínimo 20 s), roda `escuro 0`. Sem dado do Android, nada faz. Nenhum ajuste salvo muda. Medido no A12 (06:55) com a folga de teste: acendeu pelo PC e escureceu sozinho antes de 45 s parado, sem bloquear.
+Testes: `tests/test_tela_apagada.py` rodam no Ubuntu do WSL (o `sh` do Git no Windows não acha os falsos). Sem pytest lá, copie `pytest`, `_pytest`, `pluggy`, `iniconfig` e `packaging` de `C:\Python314\Lib\site-packages` para `/tmp/pyt` e rode `PYTHONPATH=/tmp/pyt python3 -m pytest tests/test_tela_apagada.py`.
 
 ## Limites reais
 - **Sobra um brilho quase imperceptível.** É a luz de fundo do LCD no mínimo. Apagar de verdade foi tentado e não dá com o toque vivo (tabela abaixo).

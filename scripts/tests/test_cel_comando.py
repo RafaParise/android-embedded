@@ -54,6 +54,13 @@ case "$1" in
         *"ela-vigia.sh vigiar' | head"*) [ -f "$FALSO_DIR/vigia" ] && cat "$FALSO_DIR/vigia" ;;
         *"grep -c tela-preta"*) [ -f "$FALSO_DIR/escureceu" ] && echo 1 || echo 0 ;;
         *"setsid nohup sh -c 'sh /data/local/tmp/tela-vigia.sh agora"*) touch "$FALSO_DIR/escureceu" ;;
+        *"[ -x /data/local/tmp/a12m/a12m ]"*) [ -f "$FALSO_DIR/sem_motor" ] && exit 1 ;;
+        *"setsid nohup /data/local/tmp/a12m/a12m vigiar"*) touch "$FALSO_DIR/vigia_a12m" ;;
+        *"a12m/a12m custo"*) [ -f "$FALSO_DIR/vigia_a12m" ] || { echo "o vigia nao esta rodando"; exit 1; }
+                            echo "vigia pid 77: RSS 2.0 MB | CPU media 0.0100% de um nucleo" ;;
+        *"a12m/a12m status"*) echo "temperatura: AP 36.1 C | BAT 34.2 C | tuneis (VPN): tun0" ;;
+        *"a12m/a12m episodios"*) echo '{"evento":"calor_inicio"}' ;;
+        *"a12m/a12m parar"*) rm -f "$FALSO_DIR/vigia_a12m"; echo "vigia parado (pid 77)" ;;
       esac; exit 0 ;;
 esac
 """
@@ -735,3 +742,67 @@ def test_faz_nunca_executa_texto_do_usuario(cel):
 def test_faz_lista_mostra_as_frases(cel):
     rc, s = cel.roda("faz", "--lista")
     assert rc == 0 and "grava a viagem" in s and "link internet" in s
+
+
+# ------------------------------------------------- motor a12m / a12-daemon (24/11)
+
+def test_motor_liga_o_vigia_nativo_e_mostra_temperatura_e_tuneis(cel):
+    _conectado(cel)
+    rc, s = cel.roda("motor")
+    assert rc == 0, s
+    assert "setsid nohup /data/local/tmp/a12m/a12m vigiar" in cel.registro()
+    assert "AP 36.1 C" in s and "tun0" in s and "vigia pid 77" in s
+
+
+def test_motor_ja_rodando_nao_abre_outro(cel):
+    _conectado(cel)
+    (cel.dir / "vigia_a12m").write_text("")
+    rc, s = cel.roda("motor", "ligar")
+    assert rc == 0 and "ja esta rodando" in s
+    assert "vigiar" not in cel.registro()
+
+
+def test_motor_sem_o_binario_manda_rodar_a_rotina_do_pc(cel):
+    _conectado(cel)
+    (cel.dir / "sem_motor").write_text("")
+    rc, s = cel.roda("motor")
+    assert rc == 2 and "rotina-a12" in s
+    assert "vigiar" not in cel.registro()
+
+
+def test_motor_com_porta_conecta_nela_primeiro(cel):
+    (cel.dir / "depuracao").write_text("")
+    rc, s = cel.roda("motor", "41234")
+    assert rc == 0, s
+    reg = cel.registro()
+    assert "adb connect 127.0.0.1:41234" in reg and reg.index("adb connect 127.0.0.1:41234") < reg.index("vigiar")
+
+
+def test_motor_episodios_parar_status_e_uso_errado(cel):
+    _conectado(cel)
+    (cel.dir / "vigia_a12m").write_text("")
+    assert cel.roda("motor", "episodios", "5")[0] == 0 and "a12m/a12m episodios 5" in cel.registro()
+    assert cel.roda("motor", "episodios", "5;reboot")[0] == 2
+    assert "reboot" not in cel.registro()
+    rc, s = cel.roda("motor", "status")
+    assert rc == 0 and "AP 36.1 C" in s
+    rc, s = cel.roda("motor", "parar")
+    assert rc == 0 and "vigia parado" in s and not (cel.dir / "vigia_a12m").exists()
+    assert cel.roda("motor", "apagar")[0] == 2
+
+
+def test_motor_sem_conexao_nao_roda_nada(cel):
+    rc, s = cel.roda("motor")
+    assert rc == 2 and "Depuracao sem fio" in s
+    assert "SHELL" not in cel.registro()
+
+
+def test_a12_daemon_e_o_motor(cel):
+    _conectado(cel)
+    link = cel.dir / "bin" / "a12-daemon"
+    link.write_text('#!/bin/bash\nexec bash "%s" motor "$@"\n' % SCRIPT)
+    link.chmod(0o755)
+    env = {"HOME": str(cel.dir / "home"), "PATH": f"{cel.dir / 'bin'}:/usr/bin:/bin", "FALSO_LOG": str(cel.dir / "log"), "FALSO_DIR": str(cel.dir)}
+    p = subprocess.Popen(["/bin/bash", str(link)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    saida, _ = p.communicate(timeout=60)
+    assert p.returncode == 0 and "AP 36.1 C" in saida, saida

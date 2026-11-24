@@ -3,6 +3,7 @@
 #   cel faz "frase"                 o Rafael (ou o Univo) diz o que quer com as palavras dele e o cel roda o comando certo (--lista; --mostra so diz)
 #   cel status                      o que esta ligado e se a conexao com o sistema esta de pe
 #   cel conectar                    liga a conexao (religa a depuracao sem fio se o Termux tiver a permissao); `cel parear PORTA CODIGO` so na 1a vez
+#   cel motor [PORTA] [ligar|status|episodios N|parar] = a12-daemon: vigia nativo a12m (so le) de calor, memoria e tuneis, 15 s
 #   cel wifi ligar|desligar|reiniciar · cel bluetooth ligar|desligar · cel dados ligar|desligar · cel aviao ligar|desligar
 #   cel internet reiniciar          modo aviao por 4 s (derruba e religa Wi-Fi e dados)
 #   cel tela apagar|acender|status  escurece SEM bloquear (depuracao segue; acende com dois toques ou volume para cima)
@@ -420,6 +421,24 @@ case "${1:-status}" in
       echo "Conexao com o sistema: NAO (ligue o Wi-Fi e a Depuracao sem fio; sem Wi-Fi, use o PC pela ponte)"
     fi
     ;;
+  motor) # a12-daemon (24/11): o vigia nativo a12m (Rust, SO LE) a cada 15 s: pressao, calor, memoria livre e tuneis da VPN
+    shift
+    if [ -n "${1:-}" ] && [ -z "${1//[0-9]/}" ]; then tem_adb; timeout 10 adb connect "127.0.0.1:$1" >/dev/null 2>&1; shift; fi
+    acao=${1:-ligar}; n=${2:-10}
+    case "$acao" in ligar|status|episodios|parar) ;; *) echo "Use: a12-daemon [PORTA] [ligar|status|episodios [N]|parar]"; exit 2 ;; esac
+    case "$n" in ''|*[!0-9]*) echo "N e um numero (quantos registros)."; exit 2 ;; esac
+    precisa
+    M=$DIR/a12m/a12m
+    sh_ "[ -x $M ]" || { echo "O motor a12m nao esta no aparelho: no PC, rode a rotina (scripts\\rotina-a12.ps1), que o envia e confere."; exit 2; }
+    case "$acao" in
+      ligar)
+        if sh_ "$M custo" >/dev/null 2>&1; then echo "O vigia ja esta rodando."
+        else sh_ "setsid nohup $M vigiar >/dev/null 2>&1 </dev/null &"; sleep 1; echo "Vigia ligado (a cada 15 s; registros: a12-daemon episodios)."; fi
+        sh_ "$M custo" | tr -d '\r'; sh_ "$M status" | tr -d '\r' ;;
+      status) sh_ "$M status" | tr -d '\r'; sh_ "$M custo" | tr -d '\r' ;;
+      episodios) sh_ "$M episodios $n" | tr -d '\r' ;;
+      parar) sh_ "$M parar" | tr -d '\r' ;;
+    esac ;;
   conectar) if conecta; then echo "Conectado: $(serial)"; else echo "Nao conectei. Wi-Fi e Depuracao sem fio ligados?"; exit 2; fi ;;
   parear)
     tem_adb
@@ -773,7 +792,7 @@ case "${1:-status}" in
                 else aplicado=0; rm -f "$TV_MARCA"; echo "$(date '+%F %T') captura parou: celular de volta a 720x1600"
                   command -v termux-notification >/dev/null 2>&1 && timeout 20 termux-notification-remove cel-tv >/dev/null 2>&1; fi
               fi
-              sleep "${CEL_TV_INTERVALO:-8}"
+              sleep "${CEL_TV_INTERVALO:-20}"  # 20/11: 20 s (escolha do Rafael: menos bateria; a TV ajusta em ate ~20 s)
             done ;;
           *) echo "Use: cel tv vigia ligar|desligar|estado"; exit 2 ;;
         esac ;;
@@ -844,5 +863,5 @@ case "${1:-status}" in
     esac
     precisa; sh_ "input keyevent $k"; echo "Tecla ${2} enviada." ;;
   sh) shift; [ $# -gt 0 ] || { echo "Use: cel sh \"comando\""; exit 2; }; precisa; sh_ "$*" ;;
-  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

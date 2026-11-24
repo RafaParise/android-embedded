@@ -299,14 +299,19 @@ def falso(pasta, nome, corpo):
 
 
 class Vigia:
-    def __init__(self, tmp, teclas="", motivo="toques", bloqueado="false", modo="vigiar"):
+    def __init__(self, tmp, teclas="", motivo="toques", bloqueado="false", modo="vigiar", parado_ms=None):
         self.tmp = tmp
         self.bin = tmp / "bin"
         self.bin.mkdir()
         self.fila = tmp / "fila"
         self.fila.write_text(teclas, encoding="utf-8")
         (tmp / "motivo-falso").write_text(motivo, encoding="utf-8")
-        falso(self.bin, "dumpsys", f'echo "isKeyguardShowing={bloqueado}"')
+        self.bloqueia(bloqueado)
+        # dumpsys power do A12 (24/11): uptime da ultima atividade, do acordar com "ms ago" e o tempo de apagar (30 min)
+        power = "" if parado_ms is None else (f"  mLastWakeTime=100000 ({parado_ms + 5000} ms ago)\n  mScreenOffTimeoutSetting=1800000\n"
+                                              f" mLastUserActivityTime(excludingAttention)=105000\n  mWakefulness=Awake\n")
+        (tmp / "power-falso").write_text(power, encoding="utf-8")
+        falso(self.bin, "dumpsys", f'case "$1" in power) cat {tmp}/power-falso;; *) echo "isKeyguardShowing=$(cat {tmp}/bloqueado-falso)";; esac')
         falso(self.bin, "input", f'echo "$*" >> {tmp}/input.log')
         falso(self.bin, "app_process", f'echo "$*" >> {tmp}/tela.log\ncase "$3" in escuro) m=$(cat {tmp}/motivo-falso); [ "$m" = morreu ] && exit 137; echo "acendeu: $m";; esac')
         # cada linha da fila = atraso e tecla; fila vazia = fica esperando
@@ -316,8 +321,11 @@ if [ -z "$linha" ]; then /bin/sleep 30; exit 0; fi
 sed -i 1d {self.fila}
 /bin/sleep "${{linha%% *}}"
 echo "EV_KEY ${{linha#* }} DOWN"; echo "EV_SYN SYN_REPORT 0\"""")
-        env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", TELA_DIR=str(tmp), TELA_JANELA="1", TELA_ESPERA_PIN="0")
+        env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", TELA_DIR=str(tmp), TELA_JANELA="1", TELA_ESPERA_PIN="0", TELA_GUARDA_S="0.2")
         self.proc = subprocess.Popen(["sh", str(VIGIA), modo, "vol", "toque", "cima", "energia"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+
+    def bloqueia(self, valor):
+        (self.tmp / "bloqueado-falso").write_text(valor, encoding="utf-8")
 
     def ler(self, nome):
         f = self.tmp / nome
@@ -394,6 +402,44 @@ def test_acender_normal_nao_mexe_no_bloqueio(vigia, motivo):
     assert v.espera(lambda: motivo in v.ler("tela-vigia.motivo"))
     time.sleep(0.3)
     assert v.ler("input.log") == ""
+
+
+# ---- sem bloqueio (24/11): depois do gesto, parado perto dos 30 min escurece de novo em vez de dormir e bloquear
+
+
+def test_depois_do_gesto_parado_escurece_de_novo_em_vez_de_bloquear(vigia):
+    v = vigia(teclas=TRES, parado_ms=1_760_000)  # 29 min 20 s parado: o Android apagaria em 40 s
+    assert v.espera(lambda: v.escureceu() >= 2)
+    assert "Tela escuro 0 toque cima energia" in v.ler("tela.log")  # a guarda nao devolve volume: ninguem apertou
+    assert "keyevent" not in v.ler("input.log")
+
+
+@pytest.mark.parametrize("parado_ms", [60_000, None])  # em uso, ou sem dado do Android
+def test_guarda_nao_escurece_em_uso_nem_sem_dado(vigia, parado_ms):
+    v = vigia(teclas=TRES, parado_ms=parado_ms)
+    assert v.espera(lambda: (v.tmp / "tela-guarda.ligada").exists())
+    assert not v.espera(lambda: v.escureceu() >= 2, 2)
+
+
+@pytest.mark.parametrize("motivo", ["energia", "dormiu", "bloqueou"])
+def test_botao_de_ligar_desliga_a_guarda(vigia, motivo):
+    v = vigia(teclas=TRES, motivo=motivo, parado_ms=1_760_000)
+    assert v.espera(lambda: "keyevent 224" in v.ler("input.log"))
+    assert not v.espera(lambda: v.escureceu() >= 2, 2)
+    assert not (v.tmp / "tela-guarda.ligada").exists()
+
+
+def test_bloqueio_com_a_tela_acesa_desliga_a_guarda(vigia):
+    v = vigia(teclas=TRES, parado_ms=60_000)
+    assert v.espera(lambda: (v.tmp / "tela-guarda.ligada").exists())
+    v.bloqueia("true")
+    assert v.espera(lambda: not (v.tmp / "tela-guarda.ligada").exists())
+    assert v.escureceu() == 1
+
+
+def test_sem_o_gesto_a_guarda_nao_age(vigia):
+    v = vigia(parado_ms=1_760_000)
+    assert not v.espera(v.escureceu, 2)
 
 
 def test_se_o_tela_morrer_o_brilho_volta(vigia):

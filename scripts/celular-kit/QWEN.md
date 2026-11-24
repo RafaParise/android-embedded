@@ -12,6 +12,7 @@
 | celular de câmera no PC / na aula · vira webcam | `cel obs camera` (frontal: `cel obs frontal`) |
 | faixa preta na câmera do OBS | `cel obs verificar` |
 | celular lento · libera a memória/RAM · otimiza (tudo) | `cel otimizar` (com o ScreenStream à toa: `cel otimizar --tudo`) — mostra a RAM antes e depois |
+| está quente? · temperatura · a VPN caiu? · vigia o celular · motor | `a12-daemon` (liga o vigia nativo e mostra temperatura, memória e túneis); `a12-daemon episodios 20` mostra o que aconteceu (calor, memória baixa, VPN caiu/voltou). Ele SÓ observa: não mata app nem muda ajuste |
 | grava a minha tela no PC | `cel obs gravar-tela` · parar: `cel obs parar-gravacao` |
 | manda minha tela para a TV/aluno/notebook | `link tela` · com som: `link tela --som` · tela cheia: `link tela --preencher` · parar: `link parar` |
 | internet livre no notebook do hotspot | `link internet` |

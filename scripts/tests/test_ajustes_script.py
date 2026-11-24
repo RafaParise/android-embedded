@@ -58,6 +58,9 @@ def test_simulacao_nao_aplica_nada(importa_script, monkeypatch, capsys):
             saida = ""
         elif c.startswith("device_config get"):
             saida = "null"
+        elif c == "pm list packages":  # desde 20/11 o script pula app desinstalado (lista os instalados uma vez)
+            pacotes = {p for p, _, _ in mod.APPOPS} | {p for p, _ in mod.GRANTS} | {p for p, _ in mod.BUCKETS} | set(mod.WHITELIST)
+            saida = "\n".join(f"package:{p}" for p in sorted(pacotes))
         elif c == "device_config is_sync_disabled_for_tests":
             saida = "false"
         elif c.startswith(("settings put", "cmd appops set", "pm grant", "pm revoke",

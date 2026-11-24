@@ -104,13 +104,9 @@ Sem cabo, o `ia` abre sozinho uma ponte local até o OmniRoute pela Tailscale e 
 
 **Reserva (PC desligado): o OmniRoute do próprio celular.** Desde 01/11/2026 o OmniRoute também está instalado no celular (`memoria/OMNIROUTE-CELULAR.md`). Com o PC no ar nada muda e o celular não gasta nada. Com o PC fora do ar, o `ia` liga o do celular sozinho (cerca de 1 minuto, uns 400 MB de RAM, só em `127.0.0.1:20129`) e desliga quando você sai do Qwen. **Ativada em 01/11 (~17:20)**: o arquivo `~/.omniroute/pronto` existe (criado depois de um chat de verdade com 3 provedores, com chaves suas), então o `ia` usa essa reserva quando o PC não responde. `ia status` mostra a situação.
 
-## 4. Passo C — usar o modelo do PC (Llama 3B): `ia pc`
+## 4. Passo C — sem o OmniRoute: `ia glm`
 
-Fraco: só para tarefa curta, e a 1ª resposta leva alguns minutos [Certo: medido em 30/10]. Use quando a nuvem estiver fora.
-
-1. **PC:** dois cliques em `ia-do-pc-abrir-ollama.cmd`. Isso abre a porta do Ollama **só para a tailnet** (ela fica sem senha; por isso nasce fechada).
-2. **Termux:** `ia pc`.
-3. Quando terminar, no PC: dois cliques em `ia-do-pc-fechar-ollama.cmd`.
+O Ollama do PC (e o `ia pc`) foi removido em 13/11/2026. Com a nuvem do OmniRoute fora, use `ia glm` (GLM 5.3 Flash grátis, só internet, sem conta; receita em `RECEITAS-ANDROID.md`).
 
 ## 4b. Passo D — o projeto do PC dentro do Qwen do celular, de qualquer lugar (ponte do PC)
 

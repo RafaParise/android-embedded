@@ -1,0 +1,11 @@
+# Compilacao cruzada no PC (o celular nao compila: 3,8 GB de RAM e /data a 86%; decisao de 20/11).
+#   cargo build --release --target aarch64-linux-android        binario do A12
+#   cargo test --target x86_64-pc-windows-gnullvm               testes dos leitores no PC (dados ficticios; o PC nao tem
+#                                                                Visual Studio, por isso o alvo gnullvm com o llvm-mingw no PATH)
+# A pasta target fica FORA de scripts/ (o sync-memoria varre scripts/ e recusa arquivo > 1 MB).
+[build]
+target-dir = "C:/Users/voce/AppData/Local/a12m-target"
+
+[target.aarch64-linux-android]
+linker = "C:/Projetos/ferramentas/android-sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android31-clang.cmd"
+rustflags = ["-C", "target-cpu=cortex-a53"]

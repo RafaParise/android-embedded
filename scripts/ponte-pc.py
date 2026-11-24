@@ -64,10 +64,12 @@ ARQUIVOS_KIT_CELULAR = {"ia": "bin/ia", "caixa": "bin/caixa", "saida": "bin/said
 # Telemetria de aparelhos (17/11/2026): perfis de hardware/software/rede, SEM dado pessoal, que o celular manda pela Tailscale.
 # A base fica na univo-sync (memoria/telemetria/ esta fora do git); `telemetria resumo` no PC refaz o PERFIS.md.
 TELEMETRIA_DIR = os.environ.get("UNIVO_TELEMETRIA_DIR", r"C:\Projetos\univo-sync\memoria\telemetria\perfis")
-MAX_PERFIL = 48 * 1024
+MAX_PERFIL = 60 * 1024  # o mesmo teto do bin/telemetria (19/11: inventário de PC)
 MAX_PERFIS_POR_HORA = 60
 SECOES_PERFIL = {"univo_telemetria", "id", "quando", "alvo", "origem", "rotulo", "aparelho", "cpu", "memoria", "armazenamento",
-                 "tela", "gpu", "bateria", "rede", "software", "testes", "arena", "avisos"}
+                 "tela", "gpu", "bateria", "rede", "software", "testes", "arena", "avisos",
+                 "sistema", "apps", "processos"}
+SO_PC_PERFIL = {"sistema", "apps", "processos"}  # inventário de programas e processos: só de PC, nunca de celular
 PRIVADO_PERFIL = [  # conferencia independente da do celular (a mesma lista do bin/telemetria)
     re.compile(r"\b([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"),
     re.compile(r"(?<![\d.])\d{15}(?![\d.])"),
@@ -385,6 +387,9 @@ except (OSError, ValueError, KeyError, TypeError):
 if _frases:
     ui["customWittyPhrases"] = _frases
 ui["hideTips"] = True
+# 19/11/2026: com o mouse ligado (padrao do Qwen Code), o toque no Termux vira clique para o Qwen e o Termux NAO abre o
+# teclado (TermuxTerminalViewClient.onSingleTapUp so mostra com isMouseTrackingActive() falso); so voltava saindo do app.
+ui["mouseTracking"] = False
 dados["ui"] = ui
 novo = arq + ".novo"
 with open(novo, "w", encoding="utf-8") as f:
@@ -464,6 +469,7 @@ ponte_instalar() {
     chmod 755 "$B/.$f.novo" && mv -f "$B/.$f.novo" "$B/$f" && echo "  [ok]  comando $f instalado em ~/bin" || { echo "  [--]  nao consegui instalar o comando $f"; rm -f "$B/.$f.novo"; erro=1; }
   done
   printf '%s\n' '#!/data/data/com.termux/files/usr/bin/bash' '# antivirus: abre o menu do guarda' 'exec bash "${0%/*}/guarda" menu "$@"' > "$B/antivirus" && chmod 755 "$B/antivirus" && echo "  [ok]  comando antivirus (menu do guarda) em ~/bin" || { echo "  [--]  nao consegui criar o comando antivirus"; erro=1; }
+  printf '%s\n' '#!/data/data/com.termux/files/usr/bin/bash' '# a12-daemon: vigia nativo a12m (so le: calor, memoria livre, tuneis da VPN a cada 15 s); uso: a12-daemon [PORTA] [ligar|status|episodios N|parar]' 'exec bash "${0%/*}/cel" motor "$@"' > "$B/a12-daemon" && chmod 755 "$B/a12-daemon" && echo "  [ok]  comando a12-daemon (vigia nativo a12m pelo cel) em ~/bin" || { echo "  [--]  nao consegui criar o comando a12-daemon"; erro=1; }
   [ -e "$A/iniciar-a12" ] || { [ -e "$T/iniciar-a12" ] && cp -p "$T/iniciar-a12" "$A/iniciar-a12"; }
   chmod 700 "$T/.iniciar-a12.novo" && mv -f "$T/.iniciar-a12.novo" "$T/iniciar-a12" && echo "  [ok]  inicio automatico em ~/.termux/boot (precisa do app Termux:Boot)" || { echo "  [--]  nao consegui instalar o inicio automatico"; rm -f "$T/.iniciar-a12.novo"; erro=1; }
   [ -e "$A/QWEN.md" ] || { [ -e "$Q/QWEN.md" ] && cp -p "$Q/QWEN.md" "$A/QWEN.md"; }
@@ -963,6 +969,8 @@ class Ponte:
             raise ErroPonte(400, "nao e um perfil da telemetria do Univo (ou o id nao confere)")
         if set(perfil) - SECOES_PERFIL:
             raise ErroPonte(422, "perfil com secao fora da lista")
+        if perfil.get("alvo") != "pc" and set(perfil) & SO_PC_PERFIL:
+            raise ErroPonte(422, "lista de apps e processos so vale para PC")
         if any(r.search(texto) for r in PRIVADO_PERFIL) or tem_segredo(texto):
             raise ErroPonte(422, "perfil recusado: parece ter dado pessoal ou segredo")
         agora = self.relogio()

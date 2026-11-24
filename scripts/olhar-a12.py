@@ -22,13 +22,38 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-SERIE = os.environ.get("A12_SERIE", "192.168.1.4:5555")
-AQUI = Path(__file__).resolve().parent
 SEM_JANELA = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+# 23/11/2026: o endereço fixo (192.168.1.4, Wi-Fi de 14/11) virou escolha na hora: cabo USB, cabo de rede (DMZ do
+# FortiGate, 10.0.10.50), Wi-Fi ou Tailscale (dados móveis), o que já estiver no adb. A12_SERIE ainda manda.
+SERIE = os.environ.get("A12_SERIE", "")
+IP_DMZ = "10.0.10.50:5555"
+
+
+def escolher_serie(saida_devices):
+    """Do `adb devices`: o cabo USB primeiro, depois a DMZ, depois qualquer outro sem fio; '' se nada."""
+    prontos = [l.split()[0] for l in saida_devices.splitlines()[1:] if len(l.split()) == 2 and l.split()[1] == "device"]
+    for criterio in (lambda s: ":" not in s, lambda s: s == IP_DMZ, lambda s: True):
+        achado = next((s for s in prontos if criterio(s)), "")
+        if achado:
+            return achado
+    return ""
+
+
+def serie():
+    global SERIE
+    if not SERIE:
+        lista = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=15, **SEM_JANELA).stdout
+        SERIE = escolher_serie(lista)
+        if not SERIE:  # nada no adb: tenta o cabo de rede da DMZ (o caminho dos outros fica com o adb-remoto.py)
+            subprocess.run(["adb", "connect", IP_DMZ], capture_output=True, text=True, timeout=15, **SEM_JANELA)
+            SERIE = IP_DMZ
+    return SERIE
+AQUI = Path(__file__).resolve().parent
 
 
 def adb(*args, texto=True, espera=30):
-    r = subprocess.run(["adb", "-s", SERIE, *args], capture_output=True, text=texto, timeout=espera, **SEM_JANELA,
+    r = subprocess.run(["adb", "-s", serie(), *args], capture_output=True, text=texto, timeout=espera, **SEM_JANELA,
                        **({"encoding": "utf-8", "errors": "replace"} if texto else {}))
     return r.stdout
 

@@ -179,6 +179,70 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
 - **Tela cheia no navegador (06/11):** todo `link tela` passa pelo intermediário: fundo PRETO (era cinza, cor do ScreenStream) e dois toques/cliques = tela cheia. `link tela --preencher`: a página diz ao celular o tamanho da tela de quem assiste e o celular desenha nessa proporção (mesma regra do `segunda-tela.py`: 16:9 -> `wm size 720x1280`); precisa do celular DEITADO e da depuração sem fio do `cel`; `link parar` devolve o tamanho normal. Trocou de rede? O link público (https) segue o mesmo e o intermediário acha o ScreenStream no endereço novo; o local muda.
 - **Internet para o notebook do hotspot (06/11): `link internet`** — receita em `VPN-SEMPRE-ATIVA.md` (proxy na porta 3128; ele configura o proxy no Windows e DESATIVA ao terminar).
 
+## Telemetria SÓ PELO CABO, em qualquer lugar (19-20/11) — usar SEMPRE o comando `telemetria` do kit
+Meta do Rafael (20/11): o A12 mede qualquer aparelho só com o cabo, sem depender de rede, Wi-Fi da escola ou PC de
+casa. A ficha fica na fila do A12 (`~/kit/telemetria/fila/`) e vai ao PC depois com `telemetria enviar`, em casa.
+| Aparelho no cabo | Comando no Termux do A12 | O que a pessoa faz |
+|---|---|---|
+| PC com Windows (notebook da escola) | `telemetria coletar pc-cabo --rotulo "Notebook sala 3"` | toca em "Ancoragem USB" no A12; no PC, Win+R e cola UMA linha (`irm http://10.x...:8765/CHAVE/c \| iex`) |
+| Outro celular Android | `telemetria coletar cabo --rotulo "Celular X"` (adaptador OTG no A12) | no outro: Depuração USB ligada e "Permitir" |
+| PC na mesma rede (sem cabo) | `telemetria coletar pc-rede notebook` | mesma linha, com o IP do Wi-Fi |
+| Celular na mesma rede (sem cabo) | no outro `adb tcpip 5555`; no A12 `adb connect IP:5555` e `telemetria coletar android` | "Permitir" uma vez; depois `adb disconnect IP:5555` |
+- O que vem do PC (lista fechada): fabricante/modelo, CPU, RAM, disco, GPU, Windows (edição, versão, build), Defender,
+  energia, programas (até 150, só nome/versão sem números/editora: SÓ de PC), processos e serviços (contagens e top
+  25 de memória). Do celular NUNCA vem lista de apps. Nunca: IP, MAC, serial, IMEI, SSID, nome de pessoa (o
+  verificador recusa a ficha inteira, no A12 e de novo no PC).
+- PROVADO: notebook da escola (Positivo N8440, i5-1345U, 15,6 GB, Win 11 Pro Education 24H2) pela rede em 20/11;
+  Redmi 9i pelo A12 pela rede (adb) em 19/11. Falta: celular no OTG de verdade; PC com Linux/macOS pelo cabo (o
+  servidor do cabo só entrega o coletor PowerShell).
+- ERROS de 20/11 (já corrigidos): (1) `coletar pc-rede` gravava a ficha e quebrava (`p` inexistente) — a ficha fica
+  na fila, `telemetria enviar` resolve; (2) a ponte do PC recusava as seções novas (`sistema`/`apps`/`processos`) e
+  passava de 48 KB — atualizada (60 KB, inventário só com alvo pc); ponte reiniciada com `ponte-pc.ps1 -Parar/-Iniciar`;
+  (3) ligar a Ancoragem USB troca a rede do A12 e derruba a sessão que o PC abriu por ssh: quando o PC comanda, rodar
+  destacado (`setsid nohup bash -lc "telemetria coletar pc-cabo X" > ~/cabo.log 2>&1 &`) e ler o log; nunca `pkill -f`
+  com o texto do próprio comando (mata a própria sessão).
+- PROVADO SÓ PELO CABO (20/11 00h15): notebook da escola -> A12 pela Ancoragem USB (origem `cabo-usb`), ficha no PC.
+  Se a janela do Win+R fecha rápido demais para ler o erro: Win+R `powershell`, colar a linha DENTRO dela; conferir
+  `ipconfig | findstr 10.179` (sem resposta = o notebook não pegou a rede do cabo: driver ou bloqueio da escola).
+  PowerShell de 32 bits só via os programas do WOW6432Node (17 de 46): o coletor lê as duas visões pelo .NET
+  (Registry64/Registry32). O nome da ficha vem de `--rotulo "..."` (o texto solto depois do pc-cabo é ignorado).
+- Dizer "funciona" só depois de testar o caso pedido (OUTRO aparelho no cabo), não o próprio A12.
+- TODAS as entradas do FortiGate versáteis (20/11): `scripts/fortigate-portas.cmd` (o Rafael aplica, 2 senhas): internet
+  (ALL, NAT, sem registro/inspeção = aceleração; nunca para a rede de casa) para a faixa do DHCP das portas 1 e 3-7
+  (10.0.20.50-150), da DMZ (10.0.10.50-60) e da porta 2 (10.0.30.10-150); PC gerencia porta 2 e DMZ; DMZ alcança os
+  apps de projeto do PC (8000-8099, 8780); DNS com BLOQUEIA_TELEMETRIA nas três. Qualquer aparelho, antigo ou novo:
+  DHCP + IPv4. Sem UPnP (FortiOS 5.4 e CGNAT da operadora): console/TV que pede "NAT aberto" fica em NAT restrito.
+- Anúncios bloqueados na casa toda, sem instalar nada (20/11): AdGuard DNS (94.140.14.14 / 94.140.15.15; IPv6
+  2a10:50c0::ad1:ff / ::ad2:ff; DoH https://dns.adguard-dns.com/dns-query). FortiGate: `config system dns` (as LANs
+  usam o DNS dele); ONT Huawei: DNS do DHCP da LAN (o Rafael, no 192.168.1.1); PC: Wi-Fi com DoH do AdGuard (feito).
+  Testado: doubleclick/googleadservices = 0.0.0.0, globoplay e google normais. YouTube não sai por DNS. Se um app de
+  vídeo travar esperando anúncio: DNS manual só naquele aparelho. Pedido de furar bloqueio de site pirata
+  (RedeCanais): recusado; não montar VPN/proxy para isso.
+- Porta 2 do FortiGate (switch da bancada, internal2, LAN2 10.0.30.x): sem internet e sem acesso do PC até o Rafael
+  aplicar `scripts/fortigate-bancada.cmd` (20/11: internet para a faixa do DHCP .10-.150 (as reservas dos controles
+  estão vazias: .10/.11 são faixa comum), nunca para a rede de casa; PC gerencia por ping/SSH/RDP/WinRM/adb/HTTP(S); DNS com BLOQUEIA_TELEMETRIA). Comando de FortiGate é texto
+  para o Rafael; ele digita a senha.
+
+## Ligar o PC desligado e teclado no Termux/RDP (19/11)
+- PC SUSPENSO (atalho "Suspender PC (Moonlight acorda)" ou Iniciar > Energia > Suspender): o Wi-Fi do PC fica de
+  guarda (WoWLAN armado em 19/11, só pacote mágico) e acorda pelo botão do próprio Moonlight ou pelo `ligar-pc`, sem
+  passar pelo FortiGate. DESLIGADO de vez: só a placa de cabo, que depende da regra do FortiGate (senha do admin
+  esquecida em 19/11; `scripts/fortigate-wol.cmd` aplica quando ele tiver a senha).
+- PELOS DADOS MÓVEIS (19/11, ADIADO pelo Rafael: "deixa para lá"): não há aparelho sempre ligado em casa e a senha
+  do FortiGate foi esquecida. Caminhos registrados: (a) ponte com celular/tablet Android velho na tomada + Tailscale
+  (recomendado, grátis); (b) recuperar a senha: no 60D o console É a porta MGMT USB (mini-USB) e só fala com o
+  FortiExplorer (cadastro grátis na Fortinet); a conta maintainer por ela costuma perder a janela de ~15 s (teste da
+  própria Fortinet); `scripts/fortigate-recuperar-senha.ps1` serve só para console serial; reset de fábrica apaga a
+  configuração (só com o sim). Mesmo com a senha, o 4G depende de a operadora não usar CGNAT (não confirmado).
+- "liga o PC" / "acorda o computador": no Termux, `ligar-pc` (manda o pacote mágico à wan1 do FortiGate e espera o
+  Sunshine responder até 3 min; `--sem-esperar`, `--status`). Só na rede de casa; pelos dados móveis não alcança. Só
+  funciona depois de o Rafael aplicar `diagnostico/fortigate-wol-pc-19-11.cli` no console e ligar o WoL no BIOS.
+  O botão de acordar do Moonlight não serve aqui (manda o MAC do Wi-Fi para a rede errada).
+- Teclado não volta no Termux: dentro do Qwen Code era o mouse do Qwen (`ui.mouseTracking: false` resolve ao reabrir
+  o `ia`); em qualquer programa, a tecla do teclado na barra de teclas extras (canto direito) reabre sem sair do app.
+- RDP (aFreeRDP) trocando "/" por ";": na sessão remota, Win+Espaço até "POR ENG (Estados Unidos)"; voltar ao ABNT2
+  no teclado físico do PC. Quando o F-Droid tiver o aFreeRDP 3.33.1, ligar "Use Android keyboard layout".
+
 ## Dados móveis, hotspot e o PC de longe [Provado 05/11]
 - Pelos dados, o PC responde pela Tailscale (100.64.0.1): RDP 3389 (aFreeRDP), ponte 20130, OmniRoute 20128.
 - Hotspot ligado (desde 06/11): a saída pelo PC CONTINUA (o celular segue sem filtro). O hotspot em si sai pela rede em uso: com o Wi-Fi da escola, o notebook pega o filtro (use `link internet`); com os dados móveis, sai livre. `saida hotspot pausar` volta ao jeito antigo.
@@ -242,4 +306,83 @@ notebook no Wi-Fi da escola, iPhone, Xiaomi). Abre em qualquer navegador. O Quic
   (desligada = o Qwen Code foi atualizado; peca ao Claude reinstalar o kit). Desligar de proposito: `... qwen-patch desfazer`.
 - `ia qwen "pergunta"`: o mesmo spinner no terminal (some antes da resposta; Ctrl+C tambem o encerra).
 - PC (Hermes): plugin `univo-status` + skin `univo`; desfazer pelo `instalar.ps1 -Desfazer` do univo-windows.
+
+
+## Otimização completa de Xiaomi/Redmi com MIUI 12.5 (Redmi 9i Sport, 19/11/2026)
+- Antes: listas `pm list packages -s/-3/-d` e `settings list global/secure/system` em `diagnostico/<aparelho>-<data>/`
+  (fora do git). Nunca tocar em app da Play Store (`pm list packages -3 -i`: instalador `com.android.vending`) nem em
+  APK que a pessoa instalou (ex.: app da SED); pré-instalado da Xiaomi que aparece como "-3" (instalador
+  `com.xiaomi.discover`, ex.: Glance `com.miui.android.fashiongallery`, WPS lite) pode sair.
+- Remoção reversível: `pm uninstall -k --user 0 <pacote>`; desfazer com `cmd package install-existing <pacote>` (gerar
+  o DESFAZER.sh na hora). Saíram: telemetria e anúncios (analytics, msa.global, daemon, bugreport, cit, loggerui,
+  engineermode/ygps/lbs), quick apps (hybrid), GetApps/Discover, Cleaner, Mi Pay, ShareMe, Mi Connect/Cast, Música,
+  Clima, Notas, Agenda Xiaomi, Quick Ball, Scanner, RCS, teclado Mint (o padrão era o Gboard), Facebook de sistema,
+  impressão, Google One/Pay Índia/Assistente Go/Lens/Android Auto/Bem-estar digital/Feedback/Turbo/YouTube/Maps/app
+  Google/TalkBack. FICAM: Play Store, GMS/GSF, WebView, Chrome (login gov.br), Gmail, Gboard, câmera, galeria (+
+  mediaeditor, gallery.player), telefone/contatos, SMS (com.android.mms), rádio FM (miui.fm, fmservice,
+  android.fmradio), relógio, calculadora, arquivos, securitycenter (permissões do MIUI), powerkeeper, home,
+  thememanager (tirar quebra papel de parede).
+- Ajustes: animações 0.5; `wifi_scan_always_enabled 0`, `ble_scan_always_enabled 0`, `mobile_data_always_on 0`; DNS
+  privado `dns.adguard-dns.com` (corta rastreador e anúncio; conferido que gov.br, Sala do Futuro, Play e Microsoft
+  resolvem); `pm trim-caches 999G`; compilação ART com `setsid sh -c 'cmd package bg-dexopt-job ...' &` (a sessão do
+  adb cai e mataria o job). Resultado: RAM livre 1,1 -> 1,8 GB.
+- Conta Xiaomi: a PESSOA sai da conta antes (Configurações > Mi Account > Sair, com a senha); só depois remover
+  account/finddevice/cloud/xmsf. Com o "Encontrar dispositivo" ligado, o bloqueio fica no servidor da Xiaomi e um
+  reset pediria a senha.
+- Cabo que cai (o adb reconecta com outro transport_id): comandos curtos com `timeout`, e o que é longo roda destacado
+  no aparelho.
+- NÃO remover no MIUI 12/12.5 (19/11, 23h): `com.xiaomi.finddevice` (o system_server o procura a cada minuto e, sem
+  ele, mostra o aviso "FindMyDevice has been destroyed"); e, por segurança de inicialização, `thememanager` (+.module),
+  `xiaomi.account`, `powerkeeper`, `guardprovider`, `cloudservice`, `micloud.sdk`, `micloudsync`. Sem a conta Mi eles
+  ficam parados. Achar a origem de aviso que "aparece do nada": `logcat -d -b all | grep -i toast` (pkg=android =
+  sistema) e o erro que se repete no mesmo minuto.
+- Depois do debloat, SEMPRE um reinício de teste com o cabo ligado: ligar `development_settings_enabled 1` antes (garante
+  o adb no boot), `adb reboot`, acompanhar `/proc/uptime` e `sys.boot_completed` (uptime que volta = loop), conferir
+  `logcat -b crash`, ANR e as configurações; depois esconder o menu de novo e `adb tcpip 5555`. Redmi 9i: 75 s, 0 loop.
+- Loop na inicialização depois de a bateria zerar (Redmi 9i, 744 ciclos em `/sys/class/power_supply/battery/cycle_count`):
+  bateria gasta, liga com tensão baixa e reinicia. Não deixar zerar; se zerar, 30 min no carregador antes de ligar.
+  Conferir o backup (`bmgr enabled`): no Redmi estava desligado e um reset apagou tudo (a pessoa escolhe; aqui só o
+  backup do WhatsApp).
+- Toque fantasma: medir parado, sem ninguém encostar, `timeout 15 getevent -l /dev/input/eventN | grep -c
+  ABS_MT_POSITION_X` (o N do touchscreen em `getevent -p`) COM e SEM o cabo. Redmi 9i: 16 com cabo, 0 sem = ruído do
+  carregador/cabo, não a tela.
+- Privacidade do Google sem mexer no resto (19/11): ID de anúncio = `am start -a com.google.android.gms.settings.ADS_PRIVACY`
+  (zerado = apagado); uso e diagnósticos e "Personalizar usando dados compartilhados" = Configurações > Google > Todos
+  os serviços (a atividade não abre pelo adb); Gboard = `am start -n com.google.android.inputmethod.latin/
+  com.google.android.apps.inputmethod.latin.preference.SettingsActivity` > Privacidade: desligar SÓ "Compartilhar
+  estatísticas de uso" e "Melhorar para todos" (a personalização local fica). Teclado de app de banco (ex.: Next) vem
+  dentro do app da Play: fica. Rolar a lista pelo MEIO da tela (do alto abre o seletor de contas, tela protegida).
+- Otimização sem remover nada (MIUI 12.5 / Android 11, 19/11 23h40), tudo com desfazer em `diagnostico/`:
+  `settings put secure upload_log_pref 0` e `upload_debug_log_pref 0` (programa de experiência e diagnóstico, que
+  continuam LIGADOS mesmo com analytics removido); `global com.android.thememanager.preferences.using_theme_show_ad
+  false`; `global pref_key_sys_app_auto_update 0`; `device_config put activity_manager use_compaction true` (RAM < 6
+  GB); pacotes Xiaomi mantidos por segurança com `cmd appops set P RUN_ANY_IN_BACKGROUND ignore` (+RUN_IN_BACKGROUND)
+  e `am set-standby-bucket P rare` (o grupo "restricted" só existe no Android 12+; app de sistema fica "5"=isento, a
+  trava de fundo vale); app da Play que não precisa de fundo (Serasa, BlaBlaCar) só `rare`; `sm fstrim` e `pm
+  trim-caches 999G`. App Segurança (pela tela): desligar "Verificar após instalação" e "Atualização automática" do
+  Avast (o Play Protect já faz), "Receber recomendações", e "Limpar cache quando bloquear" = Nunca (fechar tudo 1 min
+  depois de apagar atrasa notificação e força abertura do zero). NÃO dá: congelar apps em cache (kernel 4.19 sem
+  cgroup v2 freeze; precisa 5.2+) e `network_recommendations_enabled` (o Google volta para 1). "type=com.xiaomi" no
+  `dumpsys account` sem conta = só o autenticador registrado; conta logada aparece como Account{... type=com.xiaomi}.
+- Um celular medindo outro pela rede: no outro, `adb tcpip 5555`; no Termux do A12 `adb connect IP:5555`, o outro
+  pergunta "Permitir depuração?" (uma vez), `telemetria coletar android`, depois `adb disconnect`.
+
+## Motor nativo a12m (Rust, só lê) — 20/11/2026
+- O que é: sensor do A12 que roda como shell (`/data/local/tmp/a12m/a12m`). Não muda ajuste nenhum.
+- Usar pelo PC: `adb -s SERIAL shell /data/local/tmp/a12m/a12m status` (ou `status --json --rotulo X` para comparar com
+  o medir.py), `... episodios 20`, `... custo`. Pelo Termux, com o adb loopback do `cel`: `sh_ "/data/local/tmp/a12m/a12m status"`.
+- Episódio = "o celular sofreu": início com quem usava CPU/RAM e fim com picos e duração. Muitos episódios na hora da
+  aula = olhar o culpado; nenhum = o aparelho aguentou.
+- Atualizar: `pwsh -File scripts\rotina-a12.ps1 -SemMedir` (confere SHA-256, manda o binário novo, religa o vigia).
+- **No Termux, sem o PC (24/11): `a12-daemon`** (= `cel motor`).
+  - Ligue a Depuração por Wi-Fi e rode `a12-daemon` (ou `a12-daemon PORTA`, que faz o `adb connect 127.0.0.1:PORTA` antes).
+  - Ele liga o vigia, se não estiver rodando, e mostra o custo e a foto: memória, pressão, temperatura de AP e bateria, túneis da VPN.
+  - Outras ações: `a12-daemon status`, `a12-daemon episodios 20`, `a12-daemon parar`.
+- **Vigia 0.3 (24/11), a cada 15 s.** Além da pressão, grava:
+  - `calor_inicio`/`calor_fim`: bateria ≥ 42 °C ou AP ≥ 48 °C; fecha abaixo de 40 °C e 45 °C;
+  - `memoria_baixa_inicio`/`_fim`: abaixo de 500 MB disponíveis; fecha a partir de 650 MB;
+  - `tuneis`: a VPN caiu ou voltou (`tun0`).
+  - A temperatura vem do `dumpsys thermalservice`, porque o kernel é fechado ao shell.
+- Não fazer: rodar o binário a partir do Termux direto (o Termux não lê /proc/stat nem os outros apps); pôr o vigia
+  para "agir" (matar app, mudar bucket): o projeto mediu que piora (DECISOES 20/11).
 

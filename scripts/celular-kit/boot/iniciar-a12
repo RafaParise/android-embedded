@@ -4,6 +4,7 @@
 # e o Android nao mata o sshd nem o guarda. Log: ~/.cache/saida/boot.log
 PATH="$HOME/bin:/data/data/com.termux/files/usr/bin:$PATH"
 LOG="$HOME/.cache/saida/boot.log"
+A12M_LIGAR='[ -x /data/local/tmp/a12m/a12m ] && { setsid nohup /data/local/tmp/a12m/a12m vigiar >/dev/null 2>&1 </dev/null & echo ligado; } || echo "sem o binario"'
 mkdir -p "$HOME/.cache/saida"
 {
   echo "$(date '+%Y-%m-%d %H:%M:%S') boot: inicio"
@@ -20,6 +21,9 @@ mkdir -p "$HOME/.cache/saida"
   [ -f "$HOME/univo-sync/ligar_pc.py" ] && command -v ligar-pc >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $(ligar-pc servir-ligar 2>&1)"
   # vigia da TV (12/11/2026): captura de tela ativa = celular na proporcao da TV; parou = volta
   command -v cel >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: $(cel tv vigia ligar 2>&1 | head -n 1)"
+  # vigia do motor a12m (20/11/2026): episodios de pressao; roda como shell pelo adb do proprio celular (cel sh).
+  # Morre quando o adbd reinicia (cabo): a volta de hora em hora abaixo o religa; a trava do a12m impede 2 copias.
+  command -v cel >/dev/null 2>&1 && echo "$(date '+%Y-%m-%d %H:%M:%S') boot: motor a12m: $(timeout 60 cel sh "$A12M_LIGAR" 2>&1 | head -n 1)"
 } >> "$LOG" 2>&1
 # memoria do Univo: se alimenta sozinha (aparelho, apps, rotina, projetos do cartao e, com o PC no ar, o que o Claude fez)
 alimenta() { command -v memoria >/dev/null 2>&1 && nice -n 15 timeout 600 memoria atualizar --auto >/dev/null 2>&1; }
@@ -36,4 +40,5 @@ while :; do
   [ -f "$HOME/univo-sync/sentinela_a12.py" ] && command -v sentinela >/dev/null 2>&1 && sentinela ligar >/dev/null 2>&1
   [ -f "$HOME/univo-sync/ligar_pc.py" ] && command -v ligar-pc >/dev/null 2>&1 && ligar-pc servir-ligar >/dev/null 2>&1
   command -v cel >/dev/null 2>&1 && cel tv vigia ligar >/dev/null 2>&1
+  command -v cel >/dev/null 2>&1 && timeout 60 cel sh "$A12M_LIGAR" >/dev/null 2>&1
 done

@@ -37,10 +37,13 @@ ARQ = "Webcam_Celular"
 BRILHO_MINIMO_LANTERNA = 40  # no escuro total o sensor deu 18; com a lanterna, 132 (medido em 03/11)
 OBS_PADRAO = pathlib.Path(r"C:\Program Files\obs-studio\bin\64bit\obs64.exe")
 TAMANHOS_OK = {"1920x1080", "1440x1080", "1280x960", "1280x720", "960x720", "640x480"}  # 2560x1440 falhou no encoder do A12 em 03/11
-IP_TAILSCALE = "100.64.0.2"
+IP_TAILSCALE = "100.64.0.2"  # reserva: vale o IP que a Tailscale disser agora (ip_tailnet)
+# 23/11/2026 (pedido do Rafael: cabo, cabo de rede, Wi-Fi e dados moveis): o A12 no cabo de rede da porta DMZ do
+# FortiGate fica em 10.0.10.50, a <1 ms do PC e sem franquia. Vem antes do Wi-Fi e da Tailscale.
+IP_DMZ = "10.0.10.50"
 PORTA = 5555
 # medido em 03/11, 720p: cabo 28,5 fps; Wi-Fi local 28,7; Tailscale 28,3
-BITRATE = {"cabo": "8M", "wifi": "8M", "tailscale": "4M", "dados": "2M"}
+BITRATE = {"cabo": "8M", "dmz": "8M", "wifi": "8M", "tailscale": "4M", "dados": "2M"}
 
 
 class Erro(Exception):
@@ -382,8 +385,36 @@ def abre_porta(usb):
     print("Sem fio pronto: da proxima vez pode dispensar o cabo (vale ate reiniciar o celular).")
 
 
+def dmz_aberta():
+    """A porta 5555 do A12 responde pelo cabo de rede (DMZ)? Teste de 0,4 s, sem adb."""
+    try:
+        with socket.create_connection((IP_DMZ, PORTA), timeout=0.4):
+            return True
+    except OSError:
+        return False
+
+
+def ip_tailnet():
+    """O IP do A12 na Tailscale AGORA (muda se o aparelho for reinstalado); sem resposta, o de reserva."""
+    try:
+        s = roda(["tailscale", "status", "--json"], 15).stdout
+        for par in (json.loads(s or "{}").get("Peer") or {}).values():
+            if "samsung-a12" in (par.get("HostName", "") + par.get("DNSName", "")).lower():
+                ips = [i for i in par.get("TailscaleIPs", []) if i.startswith("100.")]
+                if ips:
+                    return ips[0]
+    except (ValueError, AttributeError, OSError, subprocess.TimeoutExpired):
+        pass
+    return IP_TAILSCALE
+
+
 def rota_sem_fio():
-    alvo = f"{IP_TAILSCALE}:{PORTA}"
+    if dmz_aberta():
+        local = f"{IP_DMZ}:{PORTA}"
+        if conecta(local):
+            print("Conexao: cabo de rede (DMZ do FortiGate)")
+            return local, "dmz"
+    alvo = f"{ip_tailnet()}:{PORTA}"
     if not conecta(alvo):
         raise Erro("nao alcancei o celular: ligue o cabo uma vez (a porta fecha ao reiniciar) e confira a Tailscale nos dois aparelhos")
     wifi = ip_wifi(roda(["adb", "-s", alvo, "shell", "ip -4 addr show wlan0"], 20).stdout)
@@ -691,7 +722,7 @@ def parar():
     if not e:
         # o processo pode ter morrido sem a limpeza (PC desligado, sessao encerrada): tira o aviso que ficou no celular
         lista = roda(["adb", "devices"]).stdout
-        serial = serial_usb(lista) or next((s for s in (f"{IP_TAILSCALE}:{PORTA}",) if f"{s}\tdevice" in lista), "")
+        serial = serial_usb(lista) or next((s for s in (f"{IP_DMZ}:{PORTA}", f"{ip_tailnet()}:{PORTA}") if f"{s}\tdevice" in lista), "")
         if serial and aviso_celular(serial, tirar=True):
             print("Tirei o aviso que tinha ficado na barra do celular.")
         for f in (ESTADO, PARAR):

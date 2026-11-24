@@ -7,8 +7,10 @@ import pytest
 
 
 @pytest.fixture
-def wc(importa_script):
-    return importa_script("webcam-celular.py")
+def wc(importa_script, monkeypatch):
+    m = importa_script("webcam-celular.py")
+    monkeypatch.setattr(m, "dmz_aberta", lambda: False)  # nada de rede de verdade nos testes
+    return m
 
 
 def test_scrcpy_usa_camera_direta_sem_audio_e_titulo_certo(wc):
@@ -126,7 +128,7 @@ def test_mesma_rede_escolhe_o_wifi_local(wc):
     assert wc.ip_wifi("Device not found") == ""
 
 
-@pytest.mark.parametrize("tipo, taxa, folga", [("cabo", "8M", False), ("wifi", "8M", True), ("tailscale", "4M", True), ("dados", "2M", True)])
+@pytest.mark.parametrize("tipo, taxa, folga", [("cabo", "8M", False), ("dmz", "8M", True), ("wifi", "8M", True), ("tailscale", "4M", True), ("dados", "2M", True)])
 def test_taxa_e_folga_por_caminho(wc, tipo, taxa, folga):
     a = wc.args_scrcpy("S", tipo=tipo)
     assert a[:3] == ["scrcpy", "-s", "S"] and f"--video-bit-rate={taxa}" in a and ("--video-buffer=50" in a) == folga
@@ -239,6 +241,30 @@ def test_sem_cabo_fora_de_casa_usa_tailscale_e_avisa_dos_dados(wc, monkeypatch, 
     a.wifi = ""
     assert wc.escolhe_rota(False) == (TS, "dados")
     assert "DADOS MOVEIS" in capsys.readouterr().out
+
+
+def test_cabo_de_rede_da_dmz_vem_antes_do_wifi_e_da_tailscale(wc, monkeypatch, capsys):
+    a = Adb(conecta=("10.0.10.50:5555", TS), wifi="inet 192.168.1.4/24")
+    monkeypatch.setattr(subprocess, "run", a)
+    monkeypatch.setattr(wc, "dmz_aberta", lambda: True)
+    assert wc.escolhe_rota(False) == ("10.0.10.50:5555", "dmz")
+    assert not any(c[:3] == ["adb", "connect", TS] for c in a.chamadas)
+    assert "cabo de rede" in capsys.readouterr().out
+
+
+def test_dmz_que_nao_aceita_o_adb_cai_na_tailscale(wc, monkeypatch):
+    a = Adb(conecta=(TS,), wifi="")
+    monkeypatch.setattr(subprocess, "run", a)
+    monkeypatch.setattr(wc, "dmz_aberta", lambda: True)
+    assert wc.escolhe_rota(False) == (TS, "dados")
+
+
+def test_ip_da_tailnet_vem_da_tailscale_ou_da_reserva(wc, monkeypatch):
+    j = json.dumps({"Peer": {"x": {"HostName": "samsung-a12", "TailscaleIPs": ["100.1.2.3", "fd7a::1"]}}})
+    monkeypatch.setattr(subprocess, "run", lambda args, **k: types.SimpleNamespace(returncode=0, stdout=j, stderr=""))
+    assert wc.ip_tailnet() == "100.1.2.3"
+    monkeypatch.setattr(subprocess, "run", lambda args, **k: types.SimpleNamespace(returncode=1, stdout="", stderr=""))
+    assert wc.ip_tailnet() == wc.IP_TAILSCALE
 
 
 def test_sem_fio_forcado_ignora_o_cabo(wc, monkeypatch):

@@ -1,0 +1,16 @@
+[package]
+name = "a12m"
+version = "0.3.0"
+edition = "2021"
+description = "Sensor nativo do Galaxy A12: status de uma chamada e vigia de episodios de pressao (so le; nao muda ajuste nenhum)"
+publish = false
+
+# Sem dependencias: so a biblioteca padrao e a libc da bionic (declarada a mao). Binario pequeno, RSS de ~1 MB.
+[dependencies]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

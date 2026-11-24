@@ -7,6 +7,12 @@
         android  OUTRO Android pelo adb: no PC, cabo USB com a depuracao permitida no celular; no Termux,
                  a depuracao sem fio pareada antes (telemetria parear) ou um aparelho que o adb ja enxergue
         pc       o computador onde o comando roda (no Termux: explica como medir um PC)
+        cabo     (Termux) OUTRO celular ligado no A12 pelo cabo USB-C (adaptador OTG no lado do A12), com a
+                 depuracao USB ligada nele: sem rede, sem root; o outro celular pede "Permitir depuracao USB?"
+        pc-cabo  (Termux) um PC ligado ao A12 pelo cabo USB: o A12 abre a Ancoragem USB (um toque), mostra UMA
+                 linha para o PC (Win+R) e recebe a ficha de volta pelo cabo; nada e instalado no PC
+        pc-rede  (Termux) um PC na MESMA rede do celular (Wi-Fi ou cabo no mesmo roteador/switch): mostra UMA linha
+                 para o PC (Win+R) e recebe a ficha pela rede; inclui sistema, programas e processos (so PC)
         --rapido pula os testes de velocidade (CPU e disco, ~5 s)
   telemetria parear IP:PORTA CODIGO   pareia a "depuracao sem fio" de outro Android (11 ou mais, mesma rede)
   telemetria enviar [--quieto]       manda ao PC (ponte, pela Tailscale) os perfis da fila; PC desligado nao perde nada
@@ -33,6 +39,10 @@ import sys
 import time
 import urllib.request
 import uuid
+try:
+    import fcntl  # so existe no Linux/Android (endereco da interface do cabo)
+except ImportError:
+    fcntl = None
 
 VERSAO = 1
 TERMUX = os.environ.get("PREFIX", "").startswith("/data/data/com.termux")
@@ -45,7 +55,7 @@ else:
 FILA, ENVIADOS = BASE / "fila", BASE / "enviados"
 PC_IP = os.environ.get("IA_PC_IP", "100.64.0.1")
 PONTE = os.environ.get("PONTE_URL", f"http://{PC_IP}:20130")
-MAX_PERFIL = 48 * 1024
+MAX_PERFIL = 60 * 1024
 
 # Propriedades do Android que podem entrar (lista FECHADA). ro.serialno, ro.boot.serialno, IMEI etc. nunca sao pedidas.
 PROPS = {
@@ -58,7 +68,11 @@ PROPS = {
     "pouca_ram": "ro.config.low_ram", "tipo_build": "ro.build.type",
 }
 SECOES = {"univo_telemetria", "id", "quando", "alvo", "origem", "rotulo", "aparelho", "cpu", "memoria", "armazenamento",
-          "tela", "gpu", "bateria", "rede", "software", "testes", "arena", "avisos"}
+          "tela", "gpu", "bateria", "rede", "software", "testes", "arena", "avisos", "sistema", "apps", "processos"}
+
+# So de PC (19/11/2026, pedido do Rafael para o notebook da escola): inventario de programas e processos e o estado do
+# sistema. Em celular a lista de apps continua PROIBIDA (mostra os habitos da pessoa).
+SO_PC = {"sistema", "apps", "processos"}
 
 # O que NUNCA pode aparecer num perfil (conferido no fim, antes de gravar ou enviar; a ponte do PC confere de novo).
 PRIVADO = [
@@ -268,9 +282,21 @@ def dispositivos_adb():
 
 
 def coleta_android_adb(serial, rapido):
-    props = props_adb(serial)
+    return coleta_android_shell(lambda comando, prazo=30: adb(serial, comando, prazo), rapido, "adb")
+
+
+def props_shell(sh):
+    laco = "; ".join(f"echo {nome}=$(getprop {chave})" for nome, chave in PROPS.items())
+    return {k: v.strip() for k, _, v in (l.partition("=") for l in sh(laco).splitlines()) if k in PROPS}
+
+
+def coleta_android_shell(sh, rapido, origem):
+    """Mede OUTRO Android por um canal de shell qualquer: sh(comando, prazo) devolve a saida (adb ou cabo USB-C)."""
+    adb = lambda _serial, comando, prazo=30: sh(comando, prazo)  # noqa: E731 (mesmo corpo para os dois canais)
+    serial = None
+    props = props_shell(sh)
     if not props.get("modelo"):
-        raise SystemExit("O aparelho nao respondeu ao adb (a depuracao foi permitida na tela dele?).")
+        raise SystemExit("O aparelho nao respondeu (a depuracao foi permitida na tela dele?).")
     ap, gpu = aparelho_android(props)
     drv = re.search(r"vulkan\.(\w+)\.so", adb(serial, "ls /vendor/lib64/hw /vendor/lib/hw 2>/dev/null"))
     if drv and not gpu["vulkan"]:
@@ -304,8 +330,303 @@ def coleta_android_adb(serial, rapido):
         if vel:
             fator = {"K": 1 / 1024, "M": 1, "G": 1024}[vel.group(2)]
             testes["disco"] = {"escrita_mb_s": round(float(vel.group(1)) * fator, 1)}
-    return {"alvo": "android", "origem": "adb", "aparelho": ap, "cpu": cpu, "memoria": mem, "armazenamento": arm,
+    return {"alvo": "android", "origem": origem, "aparelho": ap, "cpu": cpu, "memoria": mem, "armazenamento": arm,
             "tela": tela, "gpu": gpu, "bateria": bat or None, "rede": {}, "software": soft, "testes": testes}
+
+
+# ------------------------------------------------------------------ outro celular pelo cabo USB-C (OTG), sem root
+# O adb do Termux nao enxerga USB sem root (/dev/bus/usb fechado). O termux-usb (Termux:API) pede a permissao e entrega
+# um descritor ja aberto (TERMUX_USB_FD); o libusb do Termux o embrulha (wrapSysDevice) e o adb-shell fala o protocolo.
+# Dependencias, todas do repositorio oficial ou Python puro: pkg install libusb termux-api; pip install rsa pyasn1
+# libusb1; pip install --no-deps adb-shell. A chave e a mesma do adb do Termux (~/.android/adbkey).
+CABO_DEPS = ("pkg install -y libusb termux-api && pip install rsa pyasn1 libusb1 && "
+             "pip install --no-deps adb-shell")
+CHAVE_ADB = pathlib.Path.home() / ".android" / "adbkey"
+
+
+def _sem_usb_transport_do_adb_shell():
+    """O adb-shell, ao ser importado, abre um contexto libusb COM varredura de /dev/bus/usb (UsbTransport), o que o
+    Android sem root nega (LIBUSB_ERROR_IO, medido no A12 em 19/11). Nao usamos esse transporte: entra um modulo vazio."""
+    import types
+    if "adb_shell.transport.usb_transport" not in sys.modules:
+        vazio = types.ModuleType("adb_shell.transport.usb_transport")
+        vazio.UsbTransport = None
+        sys.modules["adb_shell.transport.usb_transport"] = vazio
+
+
+def cabo_deps_ok():
+    try:
+        import usb1  # noqa: F401
+        _sem_usb_transport_do_adb_shell()
+        import adb_shell.adb_device  # noqa: F401
+        import adb_shell.auth.sign_pythonrsa  # noqa: F401
+    except Exception:
+        return False
+    return bool(shutil.which("termux-usb"))
+
+
+def interface_adb(dispositivo):
+    """(numero da interface, endpoint de entrada, de saida) da interface ADB: classe 0xFF, subclasse 0x42, protocolo 1.
+    O outro celular tambem expoe MTP e outras: escolher a errada nao funciona."""
+    for config in dispositivo.iterConfigurations():
+        for interface in config:
+            for ajuste in interface:
+                if (ajuste.getClass(), ajuste.getSubClass(), ajuste.getProtocol()) != (0xFF, 0x42, 0x01):
+                    continue
+                ent = sai = None
+                for ep in ajuste:
+                    end = ep.getAddress()
+                    if end & 0x80:
+                        ent = end
+                    else:
+                        sai = end
+                if ent is not None and sai is not None:
+                    return ajuste.getNumber(), ent, sai
+    return None
+
+
+def coleta_cabo_filho(rapido):
+    """Roda DENTRO do termux-usb -E (o descritor vem em TERMUX_USB_FD). Devolve os dados do outro celular."""
+    import usb1
+    _sem_usb_transport_do_adb_shell()
+    from adb_shell.adb_device import AdbDevice
+    from adb_shell.auth.sign_pythonrsa import PythonRSASigner
+    from adb_shell.transport.base_transport import BaseTransport
+
+    fd = int(os.environ["TERMUX_USB_FD"])
+    lib = pathlib.Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr")) / "lib" / "libusb-1.0.so"
+    if lib.exists() and hasattr(usb1, "loadLibrary"):
+        try:
+            usb1.loadLibrary(str(lib))
+        except Exception:
+            pass
+    ctx = usb1.USBContext(with_device_discovery=False)
+    ctx.open()
+    alca = ctx.wrapSysDevice(fd)
+    achado = interface_adb(alca.getDevice())
+    if not achado:
+        raise SystemExit("O aparelho do cabo nao tem a interface de depuracao: ligue 'Depuracao USB' nele "
+                         "(Opcoes do desenvolvedor) e confira se o cabo passa dados.")
+    numero, ent, sai = achado
+
+    class TransporteCabo(BaseTransport):
+        def connect(self, transport_timeout_s=None):
+            alca.claimInterface(numero)
+
+        def close(self):
+            try:
+                alca.releaseInterface(numero)
+            except Exception:
+                pass
+
+        def bulk_read(self, numbytes, transport_timeout_s=None):
+            return bytes(alca.bulkRead(ent, numbytes, int((transport_timeout_s or 10) * 1000)))
+
+        def bulk_write(self, data, transport_timeout_s=None):
+            return alca.bulkWrite(sai, data, int((transport_timeout_s or 10) * 1000))
+
+    if not CHAVE_ADB.exists():
+        roda(["adb", "keygen", str(CHAVE_ADB)], 30)
+    aparelho = AdbDevice(TransporteCabo(), default_transport_timeout_s=15)
+    print("No OUTRO celular: toque em 'Permitir' (marque 'Sempre permitir deste computador'). Esperando ate 60 s...",
+          flush=True)
+    aparelho.connect(rsa_keys=[PythonRSASigner.FromRSAKeyPath(str(CHAVE_ADB))], auth_timeout_s=60)
+    try:
+        sh = lambda comando, prazo=30: aparelho.shell(comando, timeout_s=prazo, read_timeout_s=prazo) or ""  # noqa: E731
+        return coleta_android_shell(sh, rapido, "cabo-usb")
+    finally:
+        aparelho.close()
+
+
+def dispositivos_usb():
+    try:
+        return [d for d in json.loads(roda(["termux-usb", "-l"], 20) or "[]") if isinstance(d, str)]
+    except ValueError:
+        return []
+
+
+def coleta_cabo(rapido, rotulo):
+    """Lado de fora: acha o aparelho no cabo, pede a permissao e roda este mesmo comando dentro do termux-usb."""
+    if not TERMUX:
+        raise SystemExit("O 'coletar cabo' e do Termux. No PC use: telemetria coletar android (cabo + adb do PC).")
+    if not cabo_deps_ok():
+        raise SystemExit("Falta instalar (uma vez, uns 2 minutos):\n  " + CABO_DEPS)
+    usb = dispositivos_usb()
+    if not usb:
+        raise SystemExit("Nenhum aparelho no cabo. Ligue o outro celular no A12 pelo USB-C (adaptador OTG no lado do "
+                         "A12, ou no outro celular escolha 'USB controlado por: aparelho conectado') e rode de novo.")
+    if len(usb) > 1:
+        raise SystemExit("Ha mais de um aparelho no cabo; deixe so o que vai ser medido.")
+    # sem aspas nem espacos no comando (nao se sabe se o termux-usb passa por um shell): o rotulo vai pelo ambiente
+    filho = f"{sys.executable} {pathlib.Path(__file__).resolve()} _cabo-filho" + (" --rapido" if rapido else "")
+    if filho.count(" ") != (3 if rapido else 2):
+        raise SystemExit("Caminho do comando com espaco: rode o telemetria instalado em ~/bin.")
+    print("O A12 vai pedir acesso ao aparelho USB: toque em OK.", flush=True)
+    env = dict(os.environ, UNIVO_ROTULO=rotulo or "")
+    return subprocess.call(["termux-usb", "-r", "-E", "-e", filho, usb[0]], env=env)
+
+
+# ------------------------------------------------------------------ um PC pelo cabo USB (ancoragem), sem instalar nada
+# O cabo deixa o PC mandar no celular (MTP), nunca o contrario. Com a Ancoragem USB, o celular vira uma "placa de rede"
+# do PC (RNDIS, driver do proprio Windows): o Termux sobe um servidor de USO UNICO preso ao IP do cabo, o PC roda UMA
+# linha (irm ... | iex: a politica de execucao vale para ARQUIVOS, nao para texto) e devolve a ficha por POST.
+PORTA_CABO = 8765
+INTERFACES_CABO = ("rndis0", "usb0", "ncm0", "rndis1", "usb1")
+
+
+def ip_da_interface(nome):
+    if fcntl is None:
+        return None
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            pacote = fcntl.ioctl(s.fileno(), 0x8915, bytes(nome[:15], "ascii").ljust(256, b"\0"))  # SIOCGIFADDR
+        return socket.inet_ntoa(pacote[20:24])
+    except OSError:
+        return None
+
+
+def ip_do_cabo():
+    nomes = list(INTERFACES_CABO)
+    try:
+        nomes += [p.name for p in pathlib.Path("/sys/class/net").iterdir()
+                  if p.name.startswith(("rndis", "usb", "ncm")) and p.name not in nomes]
+    except OSError:
+        pass
+    for nome in nomes:
+        ip = ip_da_interface(nome)
+        if ip and not ip.startswith("127."):
+            return ip
+    return None
+
+
+def coletor_pc_remoto(url_resposta):
+    """O texto PowerShell que o PC baixa: o MESMO coletor do script-pc, devolvendo a ficha pelo cabo."""
+    return ("$json = & {\n" + PS_COLETA + "\n}\n"
+            "try { Invoke-RestMethod -Method Post -Uri '" + url_resposta + "' -Body ([Text.Encoding]::UTF8.GetBytes($json)) "
+            "-ContentType 'application/json; charset=utf-8' | Out-Null; "
+            "Write-Host 'Pronto: a ficha deste PC foi para o celular. Pode fechar esta janela.' -ForegroundColor Green } "
+            "catch { Write-Host ('Nao consegui devolver ao celular: ' + $_.Exception.Message) -ForegroundColor Red }\n")
+
+
+def servir_pc_cabo(ip, porta, chave, rotulo, prazo_s=600, ao_subir=None, origem="cabo-usb"):
+    """Servidor de uso unico: GET /CHAVE/c entrega o coletor, POST /CHAVE/r recebe a ficha (64 KB no maximo), grava
+    pela lista fechada e encerra. Devolve o caminho gravado ou None. So o IP do cabo, so com a chave."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    resultado = {}
+
+    class Atende(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _resp(self, codigo, texto, tipo="text/plain; charset=utf-8"):
+            corpo = texto.encode("utf-8")
+            self.send_response(codigo)
+            self.send_header("Content-Type", tipo)
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            self.wfile.write(corpo)
+
+        def do_GET(self):
+            if self.path == f"/{chave}/c":
+                self._resp(200, coletor_pc_remoto(f"http://{ip}:{porta}/{chave}/r"))
+            else:
+                self._resp(404, "nao")
+
+        def do_POST(self):
+            if self.path != f"/{chave}/r" or "arquivo" in resultado:
+                self._resp(404, "nao")
+                return
+            tamanho = int(self.headers.get("Content-Length") or 0)
+            if not 0 < tamanho <= 64 * 1024:
+                self._resp(413, "tamanho")
+                return
+            try:
+                dados = json.loads(self.rfile.read(tamanho).decode("utf-8-sig"))
+                if not isinstance(dados, dict):
+                    raise ValueError("formato")
+                dados["origem"] = origem
+                resultado["arquivo"] = grava(monta(dados, rotulo))
+                self._resp(200, "ok")
+            except (ValueError, UnicodeDecodeError) as e:
+                resultado["erro"] = str(e)
+                self._resp(400, "recusado")
+
+    servidor = HTTPServer((ip, porta), Atende)
+    servidor.timeout = 2
+    if ao_subir:
+        ao_subir()
+    fim = time.time() + prazo_s
+    try:
+        while time.time() < fim and "arquivo" not in resultado and "erro" not in resultado:
+            servidor.handle_request()
+    finally:
+        servidor.server_close()
+    if "erro" in resultado:
+        raise SystemExit(f"A ficha do PC foi recusada: {resultado['erro']}.")
+    return resultado.get("arquivo")
+
+
+def abrir_ancoragem():
+    roda(["am", "start", "-n", "com.android.settings/.TetherSettings"], 15)
+
+
+def coleta_pc_cabo(rotulo):
+    if not TERMUX:
+        raise SystemExit("O 'coletar pc-cabo' e do Termux (o celular ligado ao PC pelo cabo). No PC: coletar este.")
+    import secrets
+    ip = ip_do_cabo()
+    if not ip:
+        print("Ligue o A12 no PC pelo cabo USB. Abrindo a tela: toque em 'Ancoragem USB' (Conexoes > Roteador Wi-Fi e "
+              "ancoragem).", flush=True)
+        abrir_ancoragem()
+        fim = time.time() + 120
+        while not ip and time.time() < fim:
+            time.sleep(2)
+            ip = ip_do_cabo()
+    if not ip:
+        raise SystemExit("A ancoragem USB nao ligou em 2 minutos (o cabo passa dados? a Ancoragem USB ficou ligada?).")
+    chave = secrets.token_urlsafe(9)
+    linha = f'powershell -NoProfile -Command "irm http://{ip}:{PORTA_CABO}/{chave}/c | iex"'
+    print("\nNo PC: tecle Win+R, cole a linha abaixo e de Enter (pode abrir o endereco no navegador para ler antes):",
+          flush=True)
+    print("  " + linha, flush=True)
+    print("Esperando a ficha do PC (ate 10 minutos)...", flush=True)
+    arquivo = servir_pc_cabo(ip, PORTA_CABO, chave, rotulo)
+    if not arquivo:
+        raise SystemExit("O PC nao respondeu em 10 minutos.")
+    print("Pronto. Desligue a Ancoragem USB (para nao gastar dados): abrindo a tela.", flush=True)
+    abrir_ancoragem()
+    return arquivo
+
+
+def ip_do_wifi():
+    """IP do Wi-Fi do celular (a rede de casa ou da escola), para o PC da MESMA rede buscar o coletor."""
+    for nome in ("wlan0", "wlan1", "eth0"):
+        ip = ip_da_interface(nome)
+        if ip and not ip.startswith("127."):
+            return ip
+    return None
+
+
+def coleta_pc_rede(rotulo):
+    """Um PC na MESMA rede do celular (Wi-Fi ou cabo no mesmo roteador/switch), sem cabo no celular: o mesmo servidor de
+    uso unico do pc-cabo, preso ao IP do Wi-Fi, com chave sorteada; o PC roda UMA linha. Sem firewall no celular."""
+    if not TERMUX:
+        raise SystemExit("O 'coletar pc-rede' e do Termux (o celular na mesma rede do PC). No proprio PC: coletar este.")
+    import secrets
+    ip = ip_do_wifi()
+    if not ip:
+        raise SystemExit("O celular nao esta no Wi-Fi: ligue o Wi-Fi na mesma rede do PC e rode de novo.")
+    chave = secrets.token_urlsafe(9)
+    linha = f'powershell -NoProfile -Command "irm http://{ip}:{PORTA_CABO}/{chave}/c | iex"'
+    print("\nNo PC (na mesma rede): tecle Win+R, cole a linha abaixo e de Enter (pode abrir o endereco no navegador "
+          "para ler antes):", flush=True)
+    print("  " + linha, flush=True)
+    print("Esperando a ficha do PC (ate 10 minutos)...", flush=True)
+    arquivo = servir_pc_cabo(ip, PORTA_CABO, chave, rotulo, origem="rede-local")
+    if not arquivo:
+        raise SystemExit("O PC nao respondeu em 10 minutos (mesma rede? a rede da escola pode isolar aparelhos).")
+    return arquivo
 
 
 # ------------------------------------------------------------------ PC: Windows (PowerShell) ou Linux
@@ -328,6 +649,40 @@ $sw = [Diagnostics.Stopwatch]::StartNew(); while ($sw.Elapsed.TotalSeconds -lt 1
 $cpu_mb_s = [math]::Round($n / $sw.Elapsed.TotalSeconds, 1)
 $lat = @(); foreach ($i in 1..3) { $t = New-Object Net.Sockets.TcpClient; $s = [Diagnostics.Stopwatch]::StartNew(); try { $t.Connect('1.1.1.1', 443); $lat += [math]::Round($s.Elapsed.TotalMilliseconds, 1) } catch {} ; $t.Close() }
 $f = { param($x) [Univo.K32]::IsProcessorFeaturePresent($x) }
+# ---- estendido (19/11/2026): arquitetura e saude do sistema, apps e processos. Nada pessoal: sem serie, MAC, nome do
+# PC, usuario, IP, rede Wi-Fi ou caminho de pasta; versao so maior.menor (4 numeros com ponto parecem IP no filtro).
+# nome sem numero de versao (12.3.4.5 parece IP) e sem espacos sobrando, no maximo N caracteres
+function N($s, $max) { $x = ("$s" -replace '\(?v?\d+(\.\d+){1,}\)?', '' -replace '\s{2,}', ' ').Trim(); $x.Substring(0, [math]::Min($max, $x.Length)) }
+function V($s) { $x = "$s" -split '[^0-9]+' | Where-Object { $_ -ne '' }; if ($x.Count -ge 2) { "$($x[0]).$($x[1])" } elseif ($x.Count -eq 1) { "$($x[0])" } else { '' } }
+$PROIBIDO = '(?i)serial|ssid|imei|iccid|imsi|phone|telefone|@|[0-9a-f]{2}[:-][0-9a-f]{2}[:-][0-9a-f]{2}'
+$nt = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+$bios = Ler Win32_BIOS
+$caixa = (Ler Win32_SystemEnclosure | Select-Object -First 1).ChassisTypes
+$sb = try { [bool](Confirm-SecureBootUEFI) } catch { $null }
+$fw = try { if (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State') { 'UEFI' } else { 'BIOS legado' } } catch { $null }
+$tpm = try { $t = Get-CimInstance -Namespace root/cimv2/security/microsofttpm -ClassName Win32_Tpm -ErrorAction Stop; [ordered]@{ presente = $true; versao = (V (("$($t.SpecVersion)" -split ',')[0])) } } catch { $null }
+$mp = try { Get-MpComputerStatus -ErrorAction Stop } catch { $null }
+$hf = @(Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending)
+$dotnet = try { (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Stop).Release } catch { $null }
+$pf = (Ler Win32_PageFileUsage | Measure-Object -Property AllocatedBaseSize -Sum).Sum
+$plano = ((powercfg /getactivescheme) -replace '^.*\(([^)]*)\).*$', '$1')
+$radio = (netsh wlan show interfaces) | Where-Object { $_ -match '^\s*(Radio type|Tipo de r)' } | ForEach-Object { ($_ -split ':', 2)[1].Trim() } | Select-Object -First 1
+$vid = Ler Win32_VideoController | Where-Object CurrentHorizontalResolution | Select-Object -First 1
+$up = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1)
+# as DUAS visoes do registro pelo .NET: num PowerShell de 32 bits o caminho HKLM:\SOFTWARE cai no WOW6432Node e os
+# programas de 64 bits somem (20/11: 17 de 46 no notebook da escola)
+$regs = foreach ($vis in 'Registry64', 'Registry32') {
+  try { $raiz = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', $vis).OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall') } catch { $raiz = $null }
+  if ($raiz) { foreach ($nome in $raiz.GetSubKeyNames()) { $k = $raiz.OpenSubKey($nome); if ($k) {
+    [pscustomobject]@{ DisplayName = $k.GetValue('DisplayName'); DisplayVersion = $k.GetValue('DisplayVersion'); Publisher = $k.GetValue('Publisher'); SystemComponent = $k.GetValue('SystemComponent'); ParentKeyName = $k.GetValue('ParentKeyName') }
+    $k.Close() } } }
+}
+$progs = @($regs | Where-Object { $_.DisplayName -and -not $_.SystemComponent -and -not $_.ParentKeyName -and $_.DisplayName -notmatch $PROIBIDO } | Sort-Object DisplayName -Unique)
+$lista = @($progs | Select-Object -First 150 | ForEach-Object { [ordered]@{ n = (N $_.DisplayName 60); v = (V $_.DisplayVersion); e = (N $_.Publisher 30) } })
+$procs = @(Get-Process)
+$top = @($procs | Group-Object ProcessName | ForEach-Object { [ordered]@{ n = (N $_.Name 40); qtd = $_.Count; mb = [math]::Round((($_.Group | Measure-Object WorkingSet64 -Sum).Sum) / 1MB) } } | Sort-Object { $_.mb } -Descending | Where-Object { $_.n -notmatch $PROIBIDO } | Select-Object -First 25)
+$svc = @(Get-Service)
+$virt = @(Get-NetAdapter | Where-Object { -not $_.HardwareInterface }).Count
 [ordered]@{
   alvo = 'pc'; origem = 'windows'
   aparelho = [ordered]@{ fabricante = $cs.Manufacturer; modelo = $cs.Model; placa_mae = "$($bb.Manufacturer) $($bb.Product)"; tipo = $cs.SystemType }
@@ -339,6 +694,9 @@ $f = { param($x) [Univo.K32]::IsProcessorFeaturePresent($x) }
   rede = [ordered]@{ placas_ativas = $redes; internet_ms_min = $(if ($lat) { ($lat | Measure-Object -Minimum).Minimum } else { $null }) }
   software = [ordered]@{ sistema = $os.Caption; versao = $os.Version; build = $os.BuildNumber; arquitetura = $os.OSArchitecture; powershell = "$($PSVersionTable.PSVersion)" }
   testes = [ordered]@{ cpu_sha256_mb_s_1nucleo = $cpu_mb_s }
+  sistema = [ordered]@{ edicao = $os.Caption; versao_exibida = "$($nt.DisplayVersion)"; build_ubr = "$($os.BuildNumber).$($nt.UBR)" -replace '\.', '_'; instalado_ano = $os.InstallDate.Year; ligado_horas = $up; firmware = $fw; secure_boot = $sb; tpm = $tpm; virtualizacao_cpu = $p.VirtualizationFirmwareEnabled; hipervisor = $cs.HypervisorPresent; idioma = (Get-Culture).Name; fuso = (Get-TimeZone).Id; bios = [ordered]@{ fabricante = "$($bios.Manufacturer)"; versao = (V $bios.SMBIOSBIOSVersion); ano = "$($bios.ReleaseDate)".Substring(0, [math]::Min(4, "$($bios.ReleaseDate)".Length)) }; chassi = "$caixa"; tela = $(if ($vid) { "$($vid.CurrentHorizontalResolution)x$($vid.CurrentVerticalResolution)" } else { $null }); antivirus = $(if ($mp) { [ordered]@{ defender_ligado = $mp.AntivirusEnabled; tempo_real = $mp.RealTimeProtectionEnabled; assinatura_dias = $mp.AntivirusSignatureAge } } else { $null }); atualizacoes = [ordered]@{ total = $hf.Count; ultima = $(if ($hf) { $hf[0].InstalledOn.ToString('yyyy-MM') } else { $null }) }; dotnet_release = $dotnet; pagefile_mb = $pf; plano_energia = "$plano"; wsl = [bool](Get-Command wsl.exe -ErrorAction SilentlyContinue) }
+  apps = [ordered]@{ total = $progs.Count; lista = $lista; loja_total = @(Get-AppxPackage -ErrorAction SilentlyContinue).Count }
+  processos = [ordered]@{ total = $procs.Count; servicos_rodando = @($svc | Where-Object Status -eq 'Running').Count; servicos_total = $svc.Count; top_memoria = $top; adaptadores_virtuais = $virt; wifi_padrao = "$radio" }
 } | ConvertTo-Json -Depth 6 -Compress
 """.strip()
 
@@ -410,7 +768,8 @@ def limpa_rotulo(rotulo):
 def monta(dados, rotulo):
     p = {"univo_telemetria": VERSAO, "id": uuid.uuid4().hex[:12], "quando": time.strftime("%Y-%m-%dT%H:%M:%S"),
          "rotulo": limpa_rotulo(rotulo)}
-    p.update({k: v for k, v in dados.items() if k in SECOES})
+    pc = dados.get("alvo") == "pc"
+    p.update({k: v for k, v in dados.items() if k in SECOES and (pc or k not in SO_PC)})
     p["arena"] = regua_arena(p)
     return p
 
@@ -420,6 +779,8 @@ def confere(p):
     if not isinstance(p, dict) or p.get("univo_telemetria") != VERSAO:
         raise ValueError("nao e um perfil da telemetria do Univo")
     estranhas = set(p) - SECOES
+    if p.get("alvo") != "pc":
+        estranhas |= set(p) & SO_PC
     if estranhas:
         raise ValueError(f"secao fora da lista: {sorted(estranhas)[0]}")
     texto = json.dumps(p, ensure_ascii=False)
@@ -527,6 +888,7 @@ Destino: este aparelho e o PC do Rafael (pela Tailscale, ponte do PC). Nao vai p
 
 def explica_pc():
     print("Para medir um computador:")
+    print(" - Mais facil: ligue o A12 no PC pelo cabo USB e rode  telemetria coletar pc-cabo  (uma linha no PC, nada instalado)")
     print(" - PC do Rafael: no PC rode  python \"C:\\Android Embeeded\\scripts\\celular-kit\\bin\\telemetria\" coletar este")
     print(" - Qualquer PC com Windows: rode  telemetria script-pc  aqui, ligue o celular no PC pelo cabo (Transferir arquivos),")
     print("   copie Download/Univo-telemetria-pc.ps1 para o PC, clique com o botao direito > Executar com o PowerShell")
@@ -588,6 +950,21 @@ def principal(argv):
             return 1
         print(roda(["adb", "pair", args[1], args[2]], 30).strip() or "O pareamento falhou (mesma rede? codigo ainda na tela?).")
         print("Agora: telemetria coletar android  (se pedir, conecte com a porta mostrada em 'Depuracao sem fio': adb connect IP:PORTA)")
+        return 0
+    elif cmd == "_cabo-filho":
+        p = monta(coleta_cabo_filho(rapido), rotulo or os.environ.get("UNIVO_ROTULO") or None)
+    elif cmd == "coletar" and len(args) > 1 and args[1] == "cabo":
+        return coleta_cabo(rapido, rotulo)
+    elif cmd == "coletar" and len(args) > 1 and args[1] == "pc-rede":
+        # 20/11: sem o return caía no "grava(p)" do fim, com p inexistente (a ficha já estava gravada)
+        arq = coleta_pc_rede(args[2] if len(args) > 2 else (rotulo or "pc-rede"))
+        print(f"Perfil do PC gravado ({arq.name}).")
+        enviar(quieto)
+        return 0
+    elif cmd == "coletar" and len(args) > 1 and args[1] == "pc-cabo":
+        arq = coleta_pc_cabo(rotulo)
+        print(f"Perfil do PC gravado ({arq.name}).")
+        enviar(quieto)
         return 0
     elif cmd == "coletar" or cmd in ("este", "android", "pc"):
         alvo = cmd if cmd != "coletar" else (args[1] if len(args) > 1 else "este")

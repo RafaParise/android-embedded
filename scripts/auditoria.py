@@ -47,7 +47,8 @@ IME = "helium314.keyboard/.latin.LatinIME"
 ESPERADOS_FORA = {"com.samsung.android.messaging": "trocado pelo Fossify Mensagens",
                   "com.samsung.android.dialer": "trocado pelo Fossify Telefone (lote FOSS-telefone, Rafael 05/11; a emergencia fica no telephonyui)",
                   "com.sec.android.emergencylauncher": "modo de emergencia Samsung, desativado antes do projeto"}
-AJUSTES = [("global", "window_animation_scale", "0.0"), ("global", "transition_animation_scale", "0.0"),
+AJUSTES = [("system", "accessibility_reduce_transparency", "1"),  # 05/11 (DECISOES); conferida desde 20/11
+           ("global", "window_animation_scale", "0.0"), ("global", "transition_animation_scale", "0.0"),
            ("global", "animator_duration_scale", "0.0"), ("system", "show_touches", "1"), ("global", "mobile_data_always_on", "0"),
            ("global", "wifi_scan_always_enabled", "0"), ("global", "ble_scan_always_enabled", "0"),
            ("global", "force_resizable_activities", "1"), ("global", "enable_freeform_support", "1"), ("secure", "upload_apk_enable", "0"),

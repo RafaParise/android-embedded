@@ -91,5 +91,5 @@
   "privacy": { "usageStatisticsEnabled": false },
   "telemetry": { "enabled": false },
   "general": { "enableAutoUpdate": false, "outputLanguage": "pt-BR", "batchAutoCollect": false },
-  "ui": { "enableUserFeedback": false }
+  "ui": { "enableUserFeedback": false, "mouseTracking": false }
 }
